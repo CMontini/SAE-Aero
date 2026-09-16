@@ -59,7 +59,7 @@ namespace AeroVault.SolidWorks
 
         private static string[] CreateIcons()
         {
-            string root = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "AeroVault", "Icons");
+            string root = Path.Combine(System.Environment.GetFolderPath(System.Environment.SpecialFolder.LocalApplicationData), "AeroVault", "Icons");
             Directory.CreateDirectory(root);
             int[] sizes = { 20, 32, 40, 64, 96, 128 };
             string[] paths = new string[sizes.Length];

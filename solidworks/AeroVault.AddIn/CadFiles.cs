@@ -8,7 +8,7 @@ namespace AeroVault.SolidWorks
     internal static class CadFiles
     {
         internal const long MaximumBytes = 50L * 1024 * 1024;
-        internal static readonly string LocalRoot = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "AeroVault");
+        internal static readonly string LocalRoot = Path.Combine(System.Environment.GetFolderPath(System.Environment.SpecialFolder.LocalApplicationData), "AeroVault");
 
         internal static string PackageActive(ISldWorks application)
         {
