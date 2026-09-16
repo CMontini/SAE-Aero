@@ -10,6 +10,7 @@ using SolidWorks.Interop.swpublished;
 
 [assembly: AssemblyTitle("Aero Vault for SOLIDWORKS")]
 [assembly: AssemblyVersion("0.2.0.0")]
+[assembly: AssemblyFileVersion("0.2.1.0")]
 [assembly: ComVisible(false)]
 
 namespace AeroVault.SolidWorks
@@ -26,25 +27,63 @@ namespace AeroVault.SolidWorks
 
         public bool ConnectToSW(object thisSw, int cookie)
         {
+            string stage = "Check process architecture";
             try
             {
                 if (IntPtr.Size != 8) throw new InvalidOperationException("Aero Vault requires a 64-bit SOLIDWORKS process.");
+                stage = "Connect to the SOLIDWORKS application interface";
                 application = (ISldWorks)thisSw;
+                stage = "Register the SOLIDWORKS add-in callback";
                 application.SetAddinCallbackInfo2(0, this, cookie);
-                pane = (ITaskpaneView)application.CreateTaskpaneView3(CreateIcons(), "Aero Vault");
+                stage = "Create task pane icons";
+                string[] icons = CreateIcons();
+                stage = "Create the SOLIDWORKS task pane";
+                object createdPane = application.CreateTaskpaneView3(icons, "Aero Vault");
+                stage = "Connect to the task pane interface";
+                pane = (ITaskpaneView)createdPane;
                 if (pane == null) throw new InvalidOperationException("SOLIDWORKS could not create the Aero Vault task pane.");
+                stage = "Construct the Windows panel and WebView2 control";
                 panel = new VaultPanel(application) { Dock = DockStyle.Fill };
-                if (!pane.DisplayWindowFromHandlex64(panel.Handle.ToInt64()))
+                stage = "Create the Windows panel handle";
+                long panelHandle = panel.Handle.ToInt64();
+                stage = "Attach the Windows panel to the SOLIDWORKS task pane";
+                if (!pane.DisplayWindowFromHandlex64(panelHandle))
                     throw new InvalidOperationException("SOLIDWORKS could not attach the Aero Vault panel.");
+                stage = "Start the embedded browser";
                 panel.Start();
                 return true;
             }
             catch (Exception ex)
             {
+                string details = RecordStartupFailure(stage, ex);
                 DisconnectFromSW();
-                MessageBox.Show(ex.Message, "Aero Vault could not load", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                MessageBox.Show("Step: " + stage + "\n\n" + ex.GetType().Name + ": " + ex.Message +
+                    "\nHRESULT: 0x" + ex.HResult.ToString("X8") + "\n\n" + details,
+                    "Aero Vault could not load (diagnostic 0.2.1)", MessageBoxButtons.OK, MessageBoxIcon.Error);
                 return false;
             }
+        }
+
+        private static string RecordStartupFailure(string stage, Exception error)
+        {
+            try
+            {
+                string folder = Path.Combine(System.Environment.GetFolderPath(System.Environment.SpecialFolder.LocalApplicationData), "AeroVault", "Logs");
+                Directory.CreateDirectory(folder);
+                string path = Path.Combine(folder, "startup-error.txt");
+                string report = "Aero Vault startup diagnostic 0.2.1\r\n" + DateTime.UtcNow.ToString("O") +
+                    "\r\nStep: " + stage + "\r\nCLR: " + System.Environment.Version +
+                    "\r\nProcess bits: " + (IntPtr.Size * 8) +
+                    "\r\nArchitecture: " + System.Environment.GetEnvironmentVariable("PROCESSOR_ARCHITECTURE") +
+                    "\r\nOS: " + System.Environment.OSVersion +
+                    "\r\nAdd-in: " + Assembly.GetExecutingAssembly().Location +
+                    "\r\nSOLIDWORKS interop: " + typeof(ISldWorks).Assembly.FullName +
+                    "\r\nInterop path: " + typeof(ISldWorks).Assembly.Location +
+                    "\r\n\r\n" + error.ToString();
+                File.WriteAllText(path, report);
+                return "Send a screenshot of this dialog. Full error details are saved at:\n" + path;
+            }
+            catch { return "Send a screenshot of this dialog. The diagnostic file could not be saved."; }
         }
 
         public bool DisconnectFromSW()
