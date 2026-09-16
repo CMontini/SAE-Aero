@@ -46,3 +46,7 @@ next-env.d.ts
 /work/
 
 *.tsbuildinfo
+
+# Locally built Windows add-in and downloaded SDK; never CAD or credentials.
+/solidworks/bin/
+/solidworks/.packages/

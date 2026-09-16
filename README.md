@@ -1,6 +1,8 @@
 # Aero Vault — SAE Aero
 
-A private, nine-person workspace for sharing SolidWorks design packages. Built for manual browser uploads first, with a server API that can support a desktop helper later.
+A private, nine-person workspace for sharing SolidWorks design packages. Supports manual browser uploads and includes source for a SOLIDWORKS Task Pane add-in pilot.
+
+**SOLIDWORKS 2026 Student Edition / Windows:** see [the add-in installation and test guide](solidworks/README.md). Native compilation, loading, embedded sign-in, and CAD round-trip testing must still be completed on Windows; no prebuilt installer is included.
 
 ## Current workflow
 
@@ -32,6 +34,7 @@ pnpm install --frozen-lockfile
 pnpm dev
 pnpm build
 node tests/vault.test.cjs
+node tests/native-transfer.test.cjs
 pnpm exec tsc --noEmit
 ```
 
@@ -42,7 +45,7 @@ Schema changes: update db/schema.ts, run `pnpm db:generate`, inspect the new SQL
 ## Prototype boundaries
 
 - Initially hosted owner-private. Team members must be authorized at both the hosting layer and in the app before team testing.
-- Browser uploads are limited to 50 MB each. There is no automatic folder sync, SolidWorks add-in, assembly dependency parser, CAD preview, or native CAD editing.
+- Uploads are limited to 50 MB each. The add-in pilot uses SOLIDWORKS Pack and Go and opens downloaded revisions locally. There is no automatic folder sync, automatic upload on Save, server-side assembly dependency parser, or browser CAD preview/editing.
 - Packages are intentionally independent. Shared parts used by multiple packages require team coordination; filenames alone do not link packages together.
 - Revisions preserve old files, but automated backup/export and recovery drills remain pilot-readiness work.
 - No automated membership removal or admin transfer UI yet. Complete those before routine team use.
@@ -51,4 +54,4 @@ Schema changes: update db/schema.ts, run `pnpm db:generate`, inspect the new SQL
 
 ## Hosting and GitHub
 
-The source repository is CMontini/SAE-Aero. A deployment copy is preserved in the Sites source repository. The initial prototype is hosted with Sites. GitHub commits do not automatically deploy; the Sites publication workflow is currently separate.
+Source is synchronized to [CMontini/SAE-Aero](https://github.com/CMontini/SAE-Aero). The prototype is hosted with Sites. GitHub commits do not automatically deploy; the Sites publication workflow is currently separate.
