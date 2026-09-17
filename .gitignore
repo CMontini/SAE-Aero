@@ -50,3 +50,6 @@ next-env.d.ts
 # Locally built Windows add-in and downloaded SDK; never CAD or credentials.
 /solidworks/bin/
 /solidworks/.packages/
+
+/solidworks/installer/stage/
+/solidworks/installer/output/

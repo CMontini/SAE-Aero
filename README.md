@@ -2,7 +2,7 @@
 
 A private, nine-person workspace for sharing SolidWorks design packages. Supports manual browser uploads and includes source for a SOLIDWORKS Task Pane add-in pilot with automatic saves and editing presence.
 
-**SOLIDWORKS 2026 Student Edition / Windows:** see [the add-in installation and test guide](solidworks/README.md). Native compilation, loading, embedded sign-in, and CAD round-trip testing must still be completed on Windows; no prebuilt installer is included.
+**SOLIDWORKS 2026 Student Edition / Windows:** see [the add-in installation and test guide](solidworks/README.md). Download the Windows Setup EXE from [GitHub Releases](https://github.com/CMontini/SAE-Aero/releases/latest). It handles the local build and registration without terminal commands. Automatic saving has been confirmed on the owner’s computer; the new installer and multi-user CAD round trips still need testing on real SOLIDWORKS installations.
 
 ## Current workflow
 

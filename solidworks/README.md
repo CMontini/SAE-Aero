@@ -13,7 +13,19 @@ The workspace is https://aero-vault.carson-montini.chatgpt.site. Install this up
 
 One person edits each package at a time; other teammates can open a read-only copy. This is automatic session coordination, not simultaneous CAD geometry merging. It also prevents two computers signed into the same account from silently replacing one another's work.
 
-## Install or update in Windows
+## Install with Windows Setup (recommended)
+
+Download **AeroVault-Setup-0.3.1.exe** from the [latest Windows installer release](https://github.com/CMontini/SAE-Aero/releases/latest). Run it in Windows after closing SOLIDWORKS. Approve the administrator prompt and choose **Install**. If SOLIDWORKS is in a custom location, select the folder containing `SLDWORKS.exe` when asked.
+
+Setup bundles the add-in source and pinned WebView2 SDK, builds against the installed SOLIDWORKS API, runs the Windows tests, copies the tested DLLs, and registers the add-in. No PowerShell commands, Visual Studio, or separate SDK installation are required. It installs Microsoft's WebView2 Runtime if needed; that step requires internet. .NET Framework 4.8 or later must be installed (included with Windows 11).
+
+Start SOLIDWORKS normally, enable **Tools → Add-Ins → Aero Vault** (and **Start Up** if desired), open the **A** Task Pane tab, and sign in. Your account still needs both website sharing permission and Aero Vault team membership.
+
+This pilot installer is not code-signed; Windows may display an unknown-publisher warning. Only obtain it from this repository's releases. CI verifies installer compilation, bundled files, script syntax, and missing-SOLIDWORKS handling. Full install/upgrade/uninstall behavior still needs a real SOLIDWORKS computer.
+
+Re-run Setup to update. Remove it through **Windows Settings → Apps → Installed apps → Aero Vault for SOLIDWORKS**. Local CAD downloads, queued saves, account mappings, and cloud revisions are preserved. A setup failure log is saved at `%ProgramData%\AeroVault\Installer\setup.log` once preparation starts; Inno Setup also writes a log in the Windows temporary folder.
+
+## Build manually in Windows (advanced)
 
 Use Windows inside Parallels. Close SOLIDWORKS before building or installing. Prefer a folder on the local Windows drive, such as `C:\Users\YOUR_NAME\Downloads\SAE-Aero-main`, instead of a shared Mac/network folder.
 
@@ -35,7 +47,7 @@ Use Windows inside Parallels. Close SOLIDWORKS before building or installing. Pr
 
 Requirements: SOLIDWORKS 2026 Student Edition, installed SOLIDWORKS API interop assemblies, .NET Framework 4.8+, and [Microsoft Edge WebView2 Evergreen Runtime](https://developer.microsoft.com/en-us/microsoft-edge/webview2/) in Windows. The build downloads the pinned public Microsoft WebView2 SDK from NuGet. It uses the installed compiler and runs ZIP, callback-interface, and local sync-state tests before permitting installation. It does not change machine execution policy.
 
-The source includes the explicit IDispatch callback fix that allowed the prior add-in to load on the owner's Parallels installation. The 0.3 native save watcher and Pack and Go flow still need Windows/SOLIDWORKS verification. They cannot be executed in the Linux authoring environment. [SOLIDWORKS requirements](https://www.solidworks.com/support/system-requirements) list x86-64 processors; the observed working installation does not establish support for every Windows-on-ARM/Parallels setup.
+The source includes the explicit IDispatch callback fix that allowed the prior add-in to load on the owner's Parallels installation. The owner has confirmed automatic saving works in the installed 0.3 add-in. Assemblies and additional computers still need Windows/SOLIDWORKS verification. They cannot be executed in the Linux authoring environment. [SOLIDWORKS requirements](https://www.solidworks.com/support/system-requirements) list x86-64 processors; the observed working installation does not establish support for every Windows-on-ARM/Parallels setup.
 
 ## Offline saves and conflicts
 
@@ -71,3 +83,9 @@ The backend tests exercise session contention/expiry, mid-upload session changes
 Uploads remain limited to 50 MB, ZIP extraction to 5,000 entries and 512 MB expanded. The add-in packages drawings and suppressed components, excludes simulation results, and preserves the Pack and Go folder structure. Only the exact Aero Vault HTTPS origin can use the native bridge. All cloud changes use the existing signed-in website and server role checks. No cookies, passwords, or hosting bypass tokens are exported.
 
 To disable, uncheck Aero Vault in Tools → Add-Ins. To uninstall, close SOLIDWORKS and run `Uninstall.ps1` as administrator. Local CAD files, queued saves, sign-in profile, and cloud history are preserved. The site remains owner-private until its sharing settings authorize teammates in addition to app membership.
+
+## Building a release installer
+
+The **Build Windows installer** GitHub Actions workflow runs when native add-in or installer files change on `main`, or through **Run workflow**. It publishes an EXE and SHA-256 checksum to GitHub Releases after its checks pass. It does not deploy or change the website.
+
+Maintainers can also run `solidworks/installer/Build-Installer.ps1` on Windows with Inno Setup 6 installed. The release process never uploads locally installed SOLIDWORKS assemblies or any CAD files. The install-time build uses each computer's own SOLIDWORKS API. Installer source is in `solidworks/installer/`.

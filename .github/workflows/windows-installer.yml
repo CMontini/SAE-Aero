@@ -1,0 +1,74 @@
+name: Build Windows installer
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'solidworks/**'
+      - '.github/workflows/windows-installer.yml'
+  workflow_dispatch:
+permissions:
+  contents: write
+concurrency:
+  group: aerovault-windows-installer
+  cancel-in-progress: false
+jobs:
+  installer:
+    runs-on: windows-2022
+    timeout-minutes: 20
+    env:
+      INSTALLER_VERSION: '0.3.1'
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate PowerShell syntax
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          Get-ChildItem solidworks -Filter *.ps1 -Recurse | ForEach-Object {
+            $parseErrors = $null
+            $tokens = $null
+            [System.Management.Automation.Language.Parser]::ParseFile($_.FullName, [ref]$tokens, [ref]$parseErrors) | Out-Null
+            if ($parseErrors.Count) { throw ($parseErrors | Out-String) }
+          }
+      - name: Build installer
+        shell: powershell
+        run: |
+          if (-not (Test-Path "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe")) {
+            choco install innosetup --yes --no-progress
+            if ($LASTEXITCODE -ne 0) { throw 'Could not install Inno Setup.' }
+          }
+          .\solidworks\installer\Build-Installer.ps1 -Version $env:INSTALLER_VERSION
+      - name: Verify missing-SOLIDWORKS failure leaves no installed add-in
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $setup = Resolve-Path "solidworks\installer\output\AeroVault-Setup-$env:INSTALLER_VERSION.exe"
+          $process = Start-Process -FilePath $setup -ArgumentList '/VERYSILENT /SUPPRESSMSGBOXES /NORESTART /SOLIDWORKSDIR=C:\MissingSolidWorks /LOG=missing-solidworks.log' -Wait -PassThru
+          if ($process.ExitCode -ne 7) { throw "Expected preflight failure (7), got $($process.ExitCode)." }
+          if (-not (Select-String -Path missing-solidworks.log -SimpleMatch 'SOLIDWORKS was not found' -Quiet)) { throw 'Setup did not reach the expected prerequisite check.' }
+          if (Test-Path "$env:ProgramFiles\AeroVault2026\AeroVault.AddIn.dll") { throw 'Setup changed installation before preflight passed.' }
+      - name: Upload installer artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: AeroVault-Windows-Setup
+          path: solidworks/installer/output/*
+          if-no-files-found: error
+      - name: Publish installer release
+        if: github.ref == 'refs/heads/main'
+        shell: powershell
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $tag = "aerovault-setup-$env:INSTALLER_VERSION-${{ github.run_number }}"
+          $notes = @'
+          Windows installer for Aero Vault inside SOLIDWORKS 2026.
+
+          Download the EXE, close SOLIDWORKS, and run Setup in Windows. Approve the administrator prompt, then choose Install. No PowerShell commands or developer tools are required. Setup uses the installed SOLIDWORKS API, runs the Windows add-in tests, and installs Microsoft WebView2 if needed (internet required).
+
+          After installation: start SOLIDWORKS normally, enable Tools > Add-Ins > Aero Vault, open its Task Pane tab, and sign in with an authorized team account. Workspace permission is separate from installation.
+
+          This pilot installer is not code-signed. A SHA-256 checksum is included. Tested here: installer compilation and missing-SOLIDWORKS preflight. A full install/upgrade/uninstall still requires testing on a Windows computer with SOLIDWORKS installed. Keep local CAD files and queued saves in place; uninstall preserves them.
+          '@
+          $notes | Set-Content release-notes.txt
+          gh release create $tag "solidworks/installer/output/AeroVault-Setup-$env:INSTALLER_VERSION.exe" "solidworks/installer/output/AeroVault-Setup-$env:INSTALLER_VERSION.exe.sha256" --target $env:GITHUB_SHA --title "Aero Vault Windows Setup $env:INSTALLER_VERSION (build ${{ github.run_number }})" --notes-file release-notes.txt --latest
+          if ($LASTEXITCODE -ne 0) { throw 'Could not publish installer release.' }
