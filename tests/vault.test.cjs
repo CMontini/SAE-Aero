@@ -46,7 +46,7 @@ function call(route, user, body, query = '', raw = false, origin = 'https://vaul
     headers['Content-Type'] = raw ? 'application/octet-stream' : 'application/json';
     headers['Content-Length'] = String(raw ? body.length : JSON.stringify(body).length);
 } const req = new Request('https://vault.test/api/test' + query, { method: body === undefined ? 'GET' : 'POST', headers, body: body === undefined ? undefined : raw ? body : JSON.stringify(body) }); return route[body === undefined ? 'GET' : 'POST'](req); }); }
-function upload(user, id, base, content = 'test CAD package', filename = 'wing.zip', session = null, operation = null) { const q = new URLSearchParams({ action: 'upload', name: 'Main wing', subsystem: 'Wings', note: 'Test revision', filename }); if (id) {
+function upload(user, id, base, content = 'test CAD package', filename = 'wing.zip', session = null, operation = null, subsystem = 'Wings') { const q = new URLSearchParams({ action: 'upload', name: 'Main wing', subsystem, note: 'Test revision', filename }); if (id) {
     q.set('id', id);
     q.set('base', String(base)); if (session) q.set('session', session); if (operation) q.set('operation', operation);
 } return call(packages, user, content, '?' + q, true); }
@@ -76,6 +76,20 @@ function upload(user, id, base, content = 'test CAD package', filename = 'wing.z
     assert.equal(folderNames.revision,1);
     const folderRace = await Promise.all([renameFolder(admin,'Fuselage','Airframe',1),renameFolder(admin,'Propulsion','Powertrain',1)]);
     assert.deepEqual(folderRace.map(r=>r.status).sort(),[200,409]);
+    const createFolder = (user, name, revision) => call(subsystems,user,{action:'create',name,revision});
+    for (const user of [outsider,viewer,editor]) assert.equal((await createFolder(user,'Avionics',2)).status,403);
+    assert.equal((await createFolder(admin,'  ',2)).status,400);
+    assert.equal((await createFolder(admin,'Wing structures',2)).status,400);
+    const createdFolder = await createFolder(admin,'Avionics',2);
+    assert.equal(createdFolder.status,200);
+    const customSubsystem = (await createdFolder.json()).id;
+    assert.match(customSubsystem,/^subsystem-/);
+    assert.equal((await (await call(workspace,viewer)).json()).subsystems.labels[customSubsystem],'Avionics');
+    assert.equal((await createFolder(admin,'AVIONICS',3)).status,400);
+    assert.equal((await renameFolder(admin,customSubsystem,'Electronics',3)).status,200);
+    const createRace = await Promise.all([createFolder(admin,'Controls',4),createFolder(admin,'Payload',4)]);
+    assert.deepEqual(createRace.map(r=>r.status).sort(),[200,409]);
+    assert.equal(Object.keys((await (await call(workspace,admin)).json()).subsystems.labels).length,7);
     assert.equal((await upload(viewer)).status, 403);
     assert.equal((await upload(admin, null, null, 'data', 'bad.exe')).status, 400);
     const first = await upload(admin);
@@ -156,5 +170,15 @@ function upload(user, id, base, content = 'test CAD package', filename = 'wing.z
     for (let i = 0; i < 6; i++)
         assert.equal((await call(members, admin, { name: 'Member ' + i, email: `m${i}@example.test`, role: 'editor' })).status, 200);
     assert.equal((await call(members, admin, { name: 'Too many', email: 'extra@example.test', role: 'editor' })).status, 409);
-    console.log('PASS: persistent folder labels, rename permissions and conflicts, unchanged sync identity and CAD bytes, authorization, 9-person limit, editing presence, session expiry, second-device conflicts, close/reopen races, automatic save retries, concurrent revisions, mid-upload session changes, immutable history, manual updates, and status approval.');
+    const newDesign = await upload(editor,null,null,'custom folder bytes','avionics.zip',null,null,customSubsystem);
+    assert.equal(newDesign.status,200);
+    const newId = (await newDesign.json()).id, customSession = crypto.randomUUID(), customOperation = crypto.randomUUID();
+    assert.equal((await call(packages,editor,{action:'editing',id:newId,session:customSession,base:1})).status,200);
+    assert.equal((await renameFolder(admin,customSubsystem,'Electrical systems',5)).status,200);
+    const autoSave = await upload(editor,newId,1,'saved custom design','avionics.zip',customSession,customOperation,customSubsystem);
+    assert.equal(autoSave.status,200);
+    assert.equal((await (await upload(editor,newId,1,'saved custom design','avionics.zip',customSession,customOperation,customSubsystem)).json()).replayed,true);
+    assert.equal(sqlite.prepare('SELECT subsystem FROM packages WHERE id=?').get(newId).subsystem,customSubsystem);
+    assert.equal((await upload(editor,null,null,'bytes','bad.zip',null,null,'unknown-subsystem')).status,400);
+    console.log('PASS: admin folder creation, duplicate names, concurrent creation, new-folder uploads/autosaves/retries, persistent folder labels, rename permissions and conflicts, unchanged sync identity and CAD bytes, authorization, 9-person limit, editing presence, session expiry, second-device conflicts, close/reopen races, automatic save retries, concurrent revisions, mid-upload session changes, immutable history, manual updates, and status approval.');
 })().catch(e => { console.error(e); process.exitCode = 1; });

@@ -1,4 +1,4 @@
-import { payload, database, bucket, member, writable, administrator, mutation, value, event, failure, HttpError, displayName, SUBSYSTEMS, MAX_BYTES } from '@/lib/vault';
+import { payload, database, bucket, member, writable, administrator, mutation, value, event, failure, HttpError, displayName, subsystemNames, MAX_BYTES } from '@/lib/vault';
 const TTL = 120000;
 const uuid = (v: unknown) => typeof v === 'string' && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(v);
 export async function POST(request: Request) {
@@ -14,7 +14,7 @@ export async function POST(request: Request) {
             const length = Number(request.headers.get('content-length'));
             if (!Number.isInteger(length) || length <= 0 || length > MAX_BYTES || !request.body) throw new HttpError(413, 'Choose a file between 1 byte and 50 MB.');
             const name = value(url.searchParams.get('name'), 'package name', 100), subsystem = value(url.searchParams.get('subsystem'), 'subsystem');
-            if (!SUBSYSTEMS.includes(subsystem)) throw new HttpError(400, 'Choose a subsystem.');
+            if (!Object.hasOwn((await subsystemNames()).labels, subsystem)) throw new HttpError(400, 'Choose a subsystem.');
             const note = value(url.searchParams.get('note'), 'change notes', 2000);
             const existing = url.searchParams.get('id'), id = existing || crypto.randomUUID();
             const operation = url.searchParams.get('operation'), session = url.searchParams.get('session');

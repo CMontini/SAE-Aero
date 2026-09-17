@@ -45,7 +45,9 @@ export async function subsystemNames() {
     const labels: Record<string,string> = Object.fromEntries(SUBSYSTEMS.map(id => [id,id]));
     if (row) {
         const saved = JSON.parse(row.value);
-        for (const id of SUBSYSTEMS) if (typeof saved[id] === 'string') labels[id] = saved[id];
+        for (const [id, name] of Object.entries(saved)) {
+            if ((SUBSYSTEMS.includes(id) || /^subsystem-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id)) && typeof name === 'string') labels[id] = name;
+        }
     }
     return { labels, revision: row?.revision || 0 };
 }
