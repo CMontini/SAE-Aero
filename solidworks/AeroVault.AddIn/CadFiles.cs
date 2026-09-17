@@ -1,5 +1,7 @@
 using System;
 using System.IO;
+using System.Linq;
+using System.Collections.Generic;
 using SolidWorks.Interop.sldworks;
 using SolidWorks.Interop.swconst;
 
@@ -12,13 +14,42 @@ namespace AeroVault.SolidWorks
 
         internal static string PackageActive(ISldWorks application)
         {
-            IModelDoc2 model = application.ActiveDoc as IModelDoc2;
+            return PackageDesign(application, application.ActiveDoc as IModelDoc2);
+        }
+
+        internal static string[] Dependencies(IModelDoc2 model)
+        {
+            var package = (PackAndGo)model.Extension.GetPackAndGo();
+            package.IncludeDrawings = true;
+            package.IncludeSuppressed = true;
+            package.IncludeSimulationResults = false;
+            object names;
+            if (!package.GetDocumentNames(out names)) throw new IOException("Could not read the design dependencies.");
+            var files = names as Array;
+            if (files == null) throw new IOException("No design dependencies were returned.");
+            return files.Cast<object>().Select(x => Convert.ToString(x)).Where(x => !String.IsNullOrEmpty(x)).Concat(new[] { model.GetPathName() }).Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
+        }
+
+        internal static IModelDoc2 FindOpen(ISldWorks application, string path)
+        {
+            IModelDoc2 doc = application.GetFirstDocument() as IModelDoc2;
+            while (doc != null)
+            {
+                if (String.Equals(doc.GetPathName(), path, StringComparison.OrdinalIgnoreCase)) return doc;
+                doc = doc.GetNext() as IModelDoc2;
+            }
+            return null;
+        }
+
+        internal static string PackageDesign(ISldWorks application, IModelDoc2 model)
+        {
             if (model == null) throw new InvalidOperationException("Open a part, assembly, or drawing first.");
             if (String.IsNullOrEmpty(model.GetPathName())) throw new InvalidOperationException("Save the active design in SOLIDWORKS first.");
+            var dependencies = new HashSet<string>(Dependencies(model), StringComparer.OrdinalIgnoreCase);
             IModelDoc2 open = application.GetFirstDocument() as IModelDoc2;
             while (open != null)
             {
-                if (open.GetSaveFlag()) throw new InvalidOperationException("Save your open SOLIDWORKS documents before packaging. This includes any modified linked parts.");
+                if (dependencies.Contains(open.GetPathName()) && open.GetSaveFlag()) throw new InvalidOperationException("Save all modified files in this design before syncing, including linked parts.");
                 open = open.GetNext() as IModelDoc2;
             }
             string folder = Path.Combine(LocalRoot, "Staging", Guid.NewGuid().ToString("N"));

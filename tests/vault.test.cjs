@@ -23,7 +23,8 @@ const DB = { prepare: statement, async batch(list) { sqlite.exec('BEGIN'); try {
         throw e;
     } } };
 const files = new Map();
-const BUCKET = { async put(k, b) { const bytes = new Uint8Array(await new Response(b).arrayBuffer()); files.set(k, bytes); }, async head(k) { return files.has(k) ? { size: files.get(k).length } : null; }, async get(k) { const b = files.get(k); return b ? { body: b, size: b.length } : null; }, async delete(k) { files.delete(k); } };
+let duringUpload = null;
+const BUCKET = { async put(k, b) { const bytes = new Uint8Array(await new Response(b).arrayBuffer()); files.set(k, bytes); if (duringUpload) { const hook = duringUpload; duringUpload = null; await hook(); } }, async head(k) { return files.has(k) ? { size: files.get(k).length } : null; }, async get(k) { const b = files.get(k); return b ? { body: b, size: b.length } : null; }, async delete(k) { files.delete(k); } };
 let vault;
 function compile(path) { const out = ts.transpileModule(fs.readFileSync(path, 'utf8'), { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText; const module = { exports: {} }; new Function('require', 'module', 'exports', out)(name => name === 'cloudflare:workers' ? { env: { DB, BUCKET } } : name === '@/app/chatgpt-auth' ? { getChatGPTUser: async () => identity.getStore() || null } : name === '@/lib/vault' ? vault : require(name), module, module.exports); return module.exports; }
 vault = compile('lib/vault.ts');
@@ -33,9 +34,9 @@ function call(route, user, body, query = '', raw = false, origin = 'https://vaul
     headers['Content-Type'] = raw ? 'application/octet-stream' : 'application/json';
     headers['Content-Length'] = String(raw ? body.length : JSON.stringify(body).length);
 } const req = new Request('https://vault.test/api/test' + query, { method: body === undefined ? 'GET' : 'POST', headers, body: body === undefined ? undefined : raw ? body : JSON.stringify(body) }); return route[body === undefined ? 'GET' : 'POST'](req); }); }
-function upload(user, id, base, content = 'test CAD package', filename = 'wing.zip') { const q = new URLSearchParams({ action: 'upload', name: 'Main wing', subsystem: 'Wings', note: 'Test revision', filename }); if (id) {
+function upload(user, id, base, content = 'test CAD package', filename = 'wing.zip', session = null, operation = null) { const q = new URLSearchParams({ action: 'upload', name: 'Main wing', subsystem: 'Wings', note: 'Test revision', filename }); if (id) {
     q.set('id', id);
-    q.set('base', String(base));
+    q.set('base', String(base)); if (session) q.set('session', session); if (operation) q.set('operation', operation);
 } return call(packages, user, content, '?' + q, true); }
 (async () => {
     assert.equal((await call(workspace, null)).status, 401);
@@ -57,26 +58,64 @@ function upload(user, id, base, content = 'test CAD package', filename = 'wing.z
     const v1 = initial.versions[0].id;
     assert.equal((await call(download, outsider, undefined, '?id=' + v1)).status, 403);
     assert.equal(await (await call(download, viewer, undefined, '?id=' + v1)).text(), 'test CAD package');
-    const attempts = await Promise.all([call(packages, editor, { action: 'checkout', id }), call(packages, admin, { action: 'checkout', id })]);
+    const sessionA = crypto.randomUUID(), sessionB = crypto.randomUUID();
+    const edit = (user, session, base) => call(packages, user, { action: 'editing', id, session, base });
+    const finish = (user, session) => call(packages, user, { action: 'finished', id, session });
+    assert.equal((await edit(viewer, sessionA, 1)).status, 403);
+    assert.equal((await edit(editor, 'bad-session', 1)).status, 400);
+    const attempts = await Promise.all([edit(editor, sessionA, 1), edit(admin, sessionB, 1)]);
     assert.deepEqual(attempts.map(r => r.status).sort(), [200, 409]);
     const holder = sqlite.prepare('SELECT locked_by FROM packages WHERE id=?').get(id).locked_by === 'admin' ? admin : editor;
     const other = holder === admin ? editor : admin;
+    const session = holder === admin ? sessionB : sessionA;
+    assert.equal((await edit(holder, session, 1)).status, 200);
+    assert.equal((await edit(holder, crypto.randomUUID(), 1)).status, 409); // second device, same account
+    const visible = await (await call(workspace, holder)).json();
+    assert.equal(visible.packages[0].locked_by, holder.userId);
+    assert.equal('lock_token' in visible.packages[0], false);
     assert.equal((await upload(other, id, 1)).status, 409);
-    assert.equal((await upload(holder, id, 0)).status, 409);
-    const concurrent = await Promise.all([upload(holder, id, 1, 'revision A'), upload(holder, id, 1, 'revision B')]);
-    assert.deepEqual(concurrent.map(r => r.status).sort(), [200, 409]);
+    assert.equal((await upload(holder, id, 1)).status, 409); // browser cannot impersonate native session
+    assert.equal((await upload(holder, id, 0, 'stale', 'wing.zip', session)).status, 409);
+    const op = crypto.randomUUID();
+    const saves = await Promise.all([upload(holder, id, 1, 'save A', 'wing.zip', session, op), upload(holder, id, 1, 'save A', 'wing.zip', session, op)]);
+    assert.deepEqual(saves.map(r => r.status), [200, 200]);
     assert.equal(sqlite.prepare('SELECT COUNT(*) AS n FROM versions').get().n, 2);
     assert.equal(files.size, 2);
-    assert.equal(sqlite.prepare('SELECT locked_by FROM packages').get().locked_by, null);
+    assert.equal(sqlite.prepare('SELECT locked_by FROM packages').get().locked_by, holder.userId);
+    assert.equal((await upload(holder, id, 1, 'different', 'wing.zip', session, op)).status, 409);
     assert.equal(await (await call(download, viewer, undefined, '?id=' + v1)).text(), 'test CAD package');
-    assert.equal((await call(packages, editor, { action: 'status', id, base: 2, status: 'Approved' })).status, 403);
-    assert.equal((await call(packages, admin, { action: 'status', id, base: 1, status: 'Approved' })).status, 409);
-    assert.equal((await call(packages, admin, { action: 'status', id, base: 2, status: 'Approved' })).status, 200);
-    assert.equal((await call(packages, editor, { action: 'checkout', id })).status, 200);
-    assert.equal((await call(packages, admin, { action: 'release', id })).status, 200);
-    assert.equal((await upload(editor, id, 2)).status, 409);
+    assert.equal((await edit(holder, session, 1)).status, 409);
+    assert.equal((await edit(holder, session, 2)).status, 200);
+    await finish(other, session); // cannot end somebody else's session
+    assert.equal(sqlite.prepare('SELECT locked_by FROM packages').get().locked_by, holder.userId);
+    assert.equal((await call(packages, admin, { action: 'status', id, base: 2, status: 'Approved' })).status, 409);
+    await finish(holder, session);
+    assert.equal(sqlite.prepare('SELECT locked_by FROM packages').get().locked_by, null);
+    const newer = crypto.randomUUID();
+    assert.equal((await edit(other, newer, 2)).status, 200);
+    await finish(holder, session); // old close event must not clear the new session
+    assert.equal(sqlite.prepare('SELECT lock_token FROM packages').get().lock_token, newer);
+    sqlite.prepare('UPDATE packages SET locked_at=? WHERE id=?').run('2000-01-01T00:00:00.000Z', id);
+    assert.equal((await (await call(workspace, admin)).json()).packages[0].locked_by, null);
+    assert.equal((await upload(other, id, 2, 'expired', 'wing.zip', newer)).status, 409);
+    assert.equal((await edit(holder, session, 2)).status, 200); // expired session recovered automatically
+    const concurrent = await Promise.all([upload(holder, id, 2, 'save B', 'wing.zip', session, crypto.randomUUID()), upload(holder, id, 2, 'save C', 'wing.zip', session, crypto.randomUUID())]);
+    assert.deepEqual(concurrent.map(r => r.status).sort(), [200, 409]);
+    assert.equal(files.size, 3);
+    const beforeRace = files.size;
+    duringUpload = async () => { await finish(holder, session); await edit(other, newer, 3); };
+    assert.equal((await upload(holder, id, 3, 'racing save', 'wing.zip', session, crypto.randomUUID())).status, 409);
+    assert.equal(files.size, beforeRace);
+    await finish(other, newer);
+    assert.equal((await upload(editor, id, 3, 'manual update')).status, 200); // no checkout required in browser
+    assert.equal((await upload(editor, id, 3, 'old local version')).status, 409);
+    assert.equal((await call(packages, editor, { action: 'status', id, base: 4, status: 'Approved' })).status, 403);
+    assert.equal((await call(packages, admin, { action: 'status', id, base: 4, status: 'Approved' })).status, 200);
+    assert.equal((await call(packages, editor, { action: 'checkout', id })).status, 400);
+    const replay = await (await upload(holder, id, 1, 'save A', 'wing.zip', session, op)).json();
+    assert.equal(replay.version, 2); assert.equal(replay.currentVersion, 4); // lost acknowledgement after others saved
     for (let i = 0; i < 6; i++)
         assert.equal((await call(members, admin, { name: 'Member ' + i, email: `m${i}@example.test`, role: 'editor' })).status, 200);
     assert.equal((await call(members, admin, { name: 'Too many', email: 'extra@example.test', role: 'editor' })).status, 409);
-    console.log('PASS: sign-in, membership, roles, 9-person limit, cross-origin protection, uploads/downloads, competing checkouts, concurrent revisions, stale revisions, historical bytes, status approval, and admin lock recovery.');
+    console.log('PASS: authorization, 9-person limit, editing presence, session expiry, second-device conflicts, close/reopen races, automatic save retries, concurrent revisions, mid-upload session changes, immutable history, manual updates, and status approval.');
 })().catch(e => { console.error(e); process.exitCode = 1; });

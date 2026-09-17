@@ -1,87 +1,73 @@
-# Aero Vault inside SOLIDWORKS — pilot 0.2.2
+# Aero Vault inside SOLIDWORKS — pilot 0.3
 
-This adds an Aero Vault tab to the SOLIDWORKS Task Pane. It uses your existing cloud workspace, login, packages, checkout, and revision history. The browser app remains available at https://aero-vault.carson-montini.chatgpt.site.
+Aero Vault now updates a linked design after you save it in SOLIDWORKS. Manual checkout and check-in buttons have been replaced by automatic editing sessions and an **Editing by…** status.
 
-**Status:** source pilot targeting SOLIDWORKS 2026 Student Edition on Windows. The website bridge passes its automated transfer tests and TypeScript check. The native C# add-in and PowerShell installer have not been compiled or run in SOLIDWORKS by the authoring environment. Build, load, embedded sign-in, Pack and Go, and assembly reopening must be verified on your Windows installation before team use. No prebuilt DLL or signed installer is included.
+The workspace is https://aero-vault.carson-montini.chatgpt.site. Install this update on every computer using the add-in. Older add-ins can browse and upload a first package, but need this update for automatic editing and saves.
 
-## What it does
+## Daily workflow
 
-- Shows the existing authenticated workspace inside SOLIDWORKS.
-- Adds **Use active SolidWorks design** to Upload package and Check in revision. It asks SOLIDWORKS to create a Pack and Go ZIP of the saved active document, with drawings and suppressed components included. Simulation results are excluded. You review the filename and change note before uploading.
-- Adds **Open in SolidWorks** to a package. It downloads into a new local folder, extracts ZIPs, and asks you to select the top-level assembly when there are multiple CAD files.
-- Opens the latest revision for editing when the panel shows your checkout. Other downloads open read-only. Server-side checkout rules still decide whether a new revision can be uploaded.
-- Keeps previous cloud revisions intact. It does not automatically sync on Save, upload silently, or map one local file to a cloud package.
+1. **New design:** save the design and linked parts in SOLIDWORKS. In the panel choose **Upload package → Use active SolidWorks design**, choose a subsystem, and upload once. That links this exact local design to its cloud package. Selecting a ZIP through the ordinary file picker does not create a native link.
+2. **Existing package:** choose **Open for editing** in the panel. Choose the top-level assembly if asked. Aero Vault downloads into a new local folder, links it, and shows your name as the editor.
+3. **Save normally:** save the model and all modified linked parts. After a short settling delay, the add-in creates a Pack and Go snapshot and uploads a revision automatically. Rapid consecutive saves can be combined. Keep the design and SOLIDWORKS open until the panel says **Saved to Aero Vault · revision …**.
+4. **Close the design:** editing presence clears automatically. If SOLIDWORKS crashes or goes offline, presence expires after about two minutes without a heartbeat. The website refreshes status about every ten seconds.
 
-## Before installing in Parallels
+One person edits each package at a time; other teammates can open a read-only copy. This is automatic session coordination, not simultaneous CAD geometry merging. It also prevents two computers signed into the same account from silently replacing one another's work.
 
-Run every step **inside Windows**, with SOLIDWORKS 2026 already installed. Put the extracted repository on a local Windows drive (for example, `C:\Users\YOUR_NAME\Downloads\SAE-Aero-main`), rather than a Parallels shared Mac folder.
+## Install or update in Windows
 
-[SOLIDWORKS system requirements](https://www.solidworks.com/support/system-requirements) list x86-64 processors and a Parallels version for 2026. That does not establish support for every Mac or Windows-on-ARM configuration. The add-in uses an x64 WebView2 loader because it runs inside SOLIDWORKS's 64-bit process. Loading in your particular Parallels VM remains a test gate.
+Use Windows inside Parallels. Close SOLIDWORKS before building or installing. Prefer a folder on the local Windows drive, such as `C:\Users\YOUR_NAME\Downloads\SAE-Aero-main`, instead of a shared Mac/network folder.
 
-You need:
-
-- Windows .NET Framework 4.8 or later, normally present on Windows 11.
-- The installed SOLIDWORKS API interop DLLs (`api\redist` under the SOLIDWORKS installation).
-- [Microsoft Edge WebView2 Evergreen Runtime](https://developer.microsoft.com/en-us/microsoft-edge/webview2/), installed in Windows. This is separate from the SDK downloaded during the build.
-- Internet access to NuGet for the public Microsoft WebView2 SDK and to your Aero Vault workspace.
-- Windows administrator rights for the registration step only. Start SOLIDWORKS as your normal user afterward.
-
-## Build and install
-
-1. On [the repository](https://github.com/CMontini/SAE-Aero), choose **Code → Download ZIP**. In Windows Explorer, right-click the downloaded ZIP → **Properties** → **Unblock**, if shown, then extract it. Open the extracted `solidworks` folder.
-2. Open **Windows PowerShell** (the Windows built-in app). Change to that folder; replace the example path with your actual one:
+1. Download the latest ZIP from [CMontini/SAE-Aero](https://github.com/CMontini/SAE-Aero) using **Code → Download ZIP**. In Windows Explorer, open its Properties and select **Unblock** if shown, then extract it. Open Windows PowerShell and change to the extracted `solidworks` folder.
+2. Run in normal Windows PowerShell:
 
    ```powershell
-   cd "$env:USERPROFILE\Downloads\SAE-Aero-main\solidworks"
    powershell.exe -NoProfile -ExecutionPolicy RemoteSigned -File .\Build.ps1
    ```
 
-   This uses the installed .NET compiler, downloads Microsoft WebView2 SDK 1.0.3405.78 from NuGet, builds the DLL, and runs Windows ZIP safety and COM callback interface tests. It does not register anything. Continue only after **Build, archive, and COM callback tests passed**. If SOLIDWORKS is in a different folder:
-
-   ```powershell
-   powershell.exe -NoProfile -ExecutionPolicy RemoteSigned -File .\Build.ps1 -SolidWorksDirectory "C:\Program Files\SOLIDWORKS Corp\SOLIDWORKS"
-   ```
-
-3. Close SOLIDWORKS. Open **Windows PowerShell → Run as administrator**, change to the same folder, and run:
+   If your installation is not detected, append `-SolidWorksDirectory "C:\path\to\SOLIDWORKS"`, pointing to the folder containing `SLDWORKS.exe`.
+3. Continue only after **Build and all Windows tests passed**. Open Windows PowerShell **as administrator**, change to the same `solidworks` folder, and run:
 
    ```powershell
    powershell.exe -NoProfile -ExecutionPolicy RemoteSigned -File .\Install.ps1
    ```
 
-   This copies the add-in and runtime dependencies into `C:\Program Files\AeroVault2026`, registers its COM class, and adds its SOLIDWORKS Add-Ins entry. The pilot DLL is unsigned; RegAsm may warn about `/codebase` on an unsigned assembly. A nonzero exit is a failure. The command's execution policy applies only to that PowerShell process; it does not change machine policy. Do not bypass an organization-managed script restriction.
+4. Close the administrator window. Start SOLIDWORKS normally, enable **Tools → Add-Ins → Aero Vault**, and open the **A** Task Pane tab. Sign in with the account used for the website. If you previously enabled startup, a normal full restart loads the updated DLL.
 
-4. Close the administrator window. Start SOLIDWORKS normally. Open **Tools → Add-Ins**, enable **Aero Vault** under Active Add-ins, and select its **A** tab in the right Task Pane. Leave automatic startup unchecked for the first test.
-5. Sign in with the same account you use for the website. The embedded panel has its own normal browser session. If embedded sign-in is refused or loops, stop that test and send the visible error; **Open in browser** still opens the existing working web app, but does not transfer its session into the add-in.
+Requirements: SOLIDWORKS 2026 Student Edition, installed SOLIDWORKS API interop assemblies, .NET Framework 4.8+, and [Microsoft Edge WebView2 Evergreen Runtime](https://developer.microsoft.com/en-us/microsoft-edge/webview2/) in Windows. The build downloads the pinned public Microsoft WebView2 SDK from NuGet. It uses the installed compiler and runs ZIP, callback-interface, and local sync-state tests before permitting installation. It does not change machine execution policy.
 
-If compilation fails, copy the error lines and the output of `$env:PROCESSOR_ARCHITECTURE` from Windows PowerShell. Do not send credentials, cookies, or tokens.
+The source includes the explicit IDispatch callback fix that allowed the prior add-in to load on the owner's Parallels installation. The 0.3 native save watcher and Pack and Go flow still need Windows/SOLIDWORKS verification. They cannot be executed in the Linux authoring environment. [SOLIDWORKS requirements](https://www.solidworks.com/support/system-requirements) list x86-64 processors; the observed working installation does not establish support for every Windows-on-ARM/Parallels setup.
 
-## First test: use a disposable design
+## Offline saves and conflicts
 
-1. Create and save a simple part in a new Windows folder. Save all other open documents too.
-2. In Aero Vault, choose **Upload package → Use active SolidWorks design**. Confirm the ZIP filename, add a note, and upload it. Confirm revision 1 also appears in the website.
-3. Close the original part. Check out that package and choose **Open in SolidWorks**. Make a small edit, save, and use **Check in revision → Use active SolidWorks design**. Confirm revision 2 and that revision 1 can still be downloaded.
-4. Repeat with a small assembly and linked parts in separate subfolders. Close all originals before opening the downloaded copy. Choose its top-level assembly and verify that no references are missing and that its components resolve inside the new download folder.
-5. Check read-only opening when there is no checkout. Then test two accounts after both accounts have site access and app membership: a second editor must be blocked from uploading against your checkout.
+- A saved snapshot is written to a local outbox before upload. Its operation ID stays the same across retries and restarts, so a lost server response does not create repeated revisions.
+- New changes made while an older snapshot uploads are detected afterward and queued separately. Your disk files are never overwritten by a background cloud update.
+- Missing references, unsaved linked parts, oversized packages, or a newer cloud revision stop that upload and show a status message. Save the linked parts or resolve the displayed issue.
+- If you close a design before its snapshot is created, its saved disk changes remain detectable. Reopen that exact local file to resume. A closed file cannot be repackaged by this pilot without reopening it.
+- A revision conflict keeps the local copy and queued ZIP. Use **Disconnect local copy** in the sync warning when you want to keep that copy separately and open the latest cloud revision. Disconnecting asks for confirmation, ends your editing session, and preserves CAD files and the queued ZIP. Reconcile the design manually before uploading a replacement revision; no automatic merge is attempted.
+- **Save As** to a different path requires an explicit new link/upload. Renaming does not silently overwrite the original package.
+- Designs made before this update have no saved native mapping. Open them through **Open for editing**, or upload/link the active design once. Filenames alone are never used to guess the cloud package.
+- Packages remain independent. Shared parts across separate packages require team coordination.
 
-Save events do not upload automatically. Before each check-in, confirm that the active document belongs to the selected cloud package. The pilot does not detect a mistakenly selected design.
+## Test before team use
 
-## Local files, boundaries, and removal
+1. Upload/link a disposable saved part. Change a dimension and save. Verify that a new revision appears automatically and that the earlier revision can still be downloaded.
+2. Make two saves while a transfer is in progress. Verify the final cloud revision contains the later change.
+3. Close the part and verify editing status clears. Reopen the exact local file and verify your name reappears.
+4. Temporarily disconnect the network, save, and wait for a queued status. Reconnect and verify the save is acknowledged. Restart with a queued snapshot and confirm it is recovered.
+5. Test a small assembly with linked parts in separate folders. Save all modified parts and the assembly; reopen the downloaded revision and verify references and geometry. Close original same-named components before opening a downloaded copy so SOLIDWORKS does not reuse originals already in memory.
+6. With two authorized accounts, verify a second editor sees the first editor's name and can open read-only; stale local changes must not replace newer cloud work.
 
-- Downloads: `%LOCALAPPDATA%\AeroVault\Downloads`. Every download gets a separate folder; existing design files are not overwritten. Close all originals before opening a downloaded assembly to avoid SOLIDWORKS reusing same-named components already open in memory.
-- Temporary Pack and Go files: `%LOCALAPPDATA%\AeroVault\Staging`; removed after transfer or failure when possible.
-- Embedded browser profile: `%LOCALAPPDATA%\AeroVault\WebView2`. It stays local. The add-in does not export cookies or accept a hosting bypass token.
-- Limit: 50 MB per ZIP/download, 5,000 ZIP entries, 512 MB unpacked. ZIP paths are validated before writing. Cleanup removes the new extraction folder if extraction fails.
-- Native messages are accepted only from the exact Aero Vault HTTPS origin. The bridge exposes packaging and revision opening, with no general shell execution or unrestricted filesystem API. New cloud uploads still use the website's authenticated routes and require your explicit submit action.
-- The site remains owner-private. Adding team members inside the app does not by itself grant hosting access.
+The backend tests exercise session contention/expiry, mid-upload session changes, stale revisions, retries after a lost response, history preservation, and role checks with actual SQLite and an isolated object-store adapter. Those tests do not replace a real SolidWorks assembly round trip.
 
-To disable: uncheck Aero Vault in **Tools → Add-Ins**. To uninstall: close SOLIDWORKS and run `Uninstall.ps1` in Windows PowerShell as administrator (also installed in `C:\Program Files\AeroVault2026`). It unregisters this add-in and removes its installed DLLs. It leaves local CAD downloads, browser profile, and cloud revisions intact.
+## Local files and removal
 
-## Source layout
+- Installed DLLs: `C:\Program Files\AeroVault2026`.
+- Downloaded design copies: `%LOCALAPPDATA%\AeroVault\Downloads`.
+- Queued snapshots: `%LOCALAPPDATA%\AeroVault\Staging`. Do not clear this folder while uploads are pending.
+- Durable design mappings and outbox metadata: `%LOCALAPPDATA%\AeroVault\AutoSync\links.json` (with an atomic-write backup). Each mapping is tied to its signed-in account. One SOLIDWORKS process per Windows session owns automatic sync.
+- Browser profile: `%LOCALAPPDATA%\AeroVault\WebView2`.
+- Startup diagnostics: `%LOCALAPPDATA%\AeroVault\Logs\startup-error.txt`.
 
-`AeroVault.AddIn/AddIn.cs` owns COM registration and Task Pane lifecycle. `VaultPanel.cs` hosts WebView2 and the restricted message bridge. `CadFiles.cs` calls SOLIDWORKS Pack and Go and OpenDoc6. `SafeArchive.cs` extracts downloaded ZIPs. `tests/ArchiveTests.cs` exercises the actual extractor on Windows during Build.ps1. The website hook is `app/native/use-solidworks.ts`; bounded transfer logic and its Node tests are in `lib/native-transfer.ts` and `tests/native-transfer.test.cjs`.
+Uploads remain limited to 50 MB, ZIP extraction to 5,000 entries and 512 MB expanded. The add-in packages drawings and suppressed components, excludes simulation results, and preserves the Pack and Go folder structure. Only the exact Aero Vault HTTPS origin can use the native bridge. All cloud changes use the existing signed-in website and server role checks. No cookies, passwords, or hosting bypass tokens are exported.
 
-References: [SOLIDWORKS API Help](https://help.solidworks.com/2026/english/api/sldworksapiprogguide/Welcome.htm), [WebView2 security guidance](https://learn.microsoft.com/en-us/microsoft-edge/webview2/concepts/security), [pinned Microsoft WebView2 SDK](https://www.nuget.org/packages/Microsoft.Web.WebView2/1.0.3405.78).
-
-## Callback registration fix (0.2.2)
-
-If diagnostic 0.2.1 reports `Register the SOLIDWORKS add-in callback` with HRESULT `0x80004002`, update the source and rebuild. The add-in now exposes an explicit default IDispatch callback interface alongside ISwAddin. Build.ps1 tests COM interface exposure on the actual compiled DLL before writing the successful-build marker. This catches the missing-interface failure without launching SOLIDWORKS. Registration inside SOLIDWORKS and subsequent panel startup still require a real-machine test. Close SOLIDWORKS completely before rebuilding and reinstalling so it releases the previously loaded DLL.
+To disable, uncheck Aero Vault in Tools → Add-Ins. To uninstall, close SOLIDWORKS and run `Uninstall.ps1` as administrator. Local CAD files, queued saves, sign-in profile, and cloud history are preserved. The site remains owner-private until its sharing settings authorize teammates in addition to app membership.

@@ -69,5 +69,10 @@ $callbackTest = Join-Path $output 'CallbackTests.exe'
 if ($LASTEXITCODE -ne 0) { throw 'Callback test compilation failed.' }
 & $callbackTest
 if ($LASTEXITCODE -ne 0) { throw 'COM callback interface tests failed. Do not install this build.' }
-Set-Content -LiteralPath $buildMarker -Value 'Build, archive, and COM callback tests passed.'
-Write-Host "Build, archive, and COM callback tests passed. Next run Install.ps1 from Windows PowerShell as administrator. Output: $output"
+$syncTest = Join-Path $output 'SyncStateTests.exe'
+& $compiler /nologo /target:exe /platform:anycpu /langversion:5 ("/out:" + $syncTest) /reference:System.dll /reference:System.Core.dll /reference:System.Web.Extensions.dll (Join-Path $PSScriptRoot 'AeroVault.AddIn\SyncState.cs') (Join-Path $PSScriptRoot 'tests\SyncStateTests.cs')
+if ($LASTEXITCODE -ne 0) { throw 'Sync state test compilation failed.' }
+& $syncTest
+if ($LASTEXITCODE -ne 0) { throw 'Sync state tests failed. Do not install this build.' }
+Set-Content -LiteralPath $buildMarker -Value 'Build and all Windows tests passed.'
+Write-Host "Build and all Windows tests passed. Next run Install.ps1 from Windows PowerShell as administrator. Output: $output"

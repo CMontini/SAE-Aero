@@ -22,16 +22,27 @@ namespace AeroVault.SolidWorks
         public bool readOnly { get; set; }
         public int index { get; set; }
         public int protocol { get; set; }
+        public string ownerId { get; set; }
+        public string packageId { get; set; }
+        public string session { get; set; }
+        public string name { get; set; }
+        public string subsystem { get; set; }
+        public int version { get; set; }
+        public int currentVersion { get; set; }
+        public string preparedId { get; set; }
+        public bool success { get; set; }
+        public bool conflict { get; set; }
+        public string message { get; set; }
     }
 
-    internal sealed class VaultPanel : UserControl
+    internal sealed partial class VaultPanel : UserControl
     {
         internal const string Home = "https://aero-vault.carson-montini.chatgpt.site";
         private readonly ISldWorks application;
         private readonly WebView2 browser;
         private readonly Label status;
         private readonly JavaScriptSerializer json = new JavaScriptSerializer { MaxJsonLength = 1024 * 1024 };
-        private readonly Dictionary<string, bool> openRequests = new Dictionary<string, bool>();
+        private readonly Dictionary<string, BridgeCommand> openRequests = new Dictionary<string, BridgeCommand>();
         private bool packaging;
         private bool stopped;
         private TaskCompletionSource<bool> acknowledgement;
@@ -54,6 +65,7 @@ namespace AeroVault.SolidWorks
             Controls.Add(browser);
             Controls.Add(toolbar);
             Controls.Add(status);
+            InitializeSync();
         }
 
         internal async void Start()
@@ -74,7 +86,7 @@ namespace AeroVault.SolidWorks
                 {
                     Uri uri;
                     if (!Uri.TryCreate(e.Uri, UriKind.Absolute, out uri) || (uri.Scheme != "https" && e.Uri != "about:blank")) e.Cancel = true;
-                    if (!Trusted(e.Uri)) { CancelTransfer(); status.Text = "Sign in to your existing Aero Vault account. Native actions are disabled on sign-in pages."; }
+                    if (!Trusted(e.Uri)) { bridgeReady = false; CancelTransfer(); status.Text = "Sign in to your existing Aero Vault account. Native actions are disabled on sign-in pages."; }
                 };
                 browser.CoreWebView2.NewWindowRequested += delegate(object sender, CoreWebView2NewWindowRequestedEventArgs e)
                 {
@@ -122,18 +134,25 @@ namespace AeroVault.SolidWorks
         {
             if (!CanSend || !Trusted(e.Source)) return;
             string id = null;
+            BridgeCommand command = null;
             try
             {
                 string raw = e.WebMessageAsJson;
                 if (raw.Length > 4096) throw new InvalidOperationException("The native request was too large.");
-                BridgeCommand command = json.Deserialize<BridgeCommand>(raw);
+                command = json.Deserialize<BridgeCommand>(raw);
                 if (command == null) return;
                 id = command.requestId;
-                if (command.type == "aerovault:hello" && command.protocol == 1)
+                if (command.type == "aerovault:hello" && command.protocol == 2 && !String.IsNullOrEmpty(command.ownerId) && command.ownerId.Length <= 200)
                 {
-                    Send(new { type = "aerovault:ready", protocol = 1, version = "0.2.0" });
+                    if (ownerId != command.ownerId) { CancelTransfer(); if (cloudAcknowledgement != null) cloudAcknowledgement.TrySetCanceled(); }
+                    ownerId = command.ownerId;
+                    bridgeReady = true;
+                    nextPresence = DateTime.MinValue;
+                    Send(new { type = "aerovault:ready", protocol = 2, version = "0.3.0" });
+                    PublishPresence();
                     return;
                 }
+                if (command.type == "aerovault:hello") return;
                 if (command.type == "aerovault:ack")
                 {
                     if (command.requestId == transferId && command.index == transferIndex && acknowledgement != null) acknowledgement.TrySetResult(true);
@@ -141,41 +160,33 @@ namespace AeroVault.SolidWorks
                 }
                 Guid parsed;
                 if (!Guid.TryParse(id, out parsed)) throw new InvalidOperationException("Invalid native request identifier.");
+                if (!bridgeReady) throw new InvalidOperationException("Sign in to Aero Vault before syncing.");
+                if (command.type == "aerovault:sync-result") { SyncResult(command); return; }
+                if (command.type == "aerovault:lease-result") { LeaseResult(command); return; }
+                if (command.type == "aerovault:disconnect-design") { DisconnectDesign(command); return; }
+                if (command.type == "aerovault:link-prepared") { LinkPrepared(command); return; }
                 if (command.type == "aerovault:package-active")
                 {
-                    if (packaging) throw new InvalidOperationException("A design is already being prepared.");
+                    if (packaging) throw new InvalidOperationException("A saved design is already transferring. Wait for it to finish.");
                     packaging = true;
                     string file = null;
                     try
                     {
-                        status.Text = "Collecting the active design and its linked files…";
-                        // All SOLIDWORKS COM calls stay on the application's UI thread.
-                        file = CadFiles.PackageActive(application);
-                        long size = new FileInfo(file).Length;
-                        Send(new { type = "aerovault:file-begin", requestId = id, name = Path.GetFileName(file), size = size });
-                        using (FileStream stream = File.OpenRead(file))
-                        {
-                            byte[] buffer = new byte[384 * 1024];
-                            int count, index = 0;
-                            while ((count = stream.Read(buffer, 0, buffer.Length)) > 0)
-                            {
-                                transferId = id;
-                                transferIndex = index;
-                                acknowledgement = new TaskCompletionSource<bool>();
-                                Send(new { type = "aerovault:file-chunk", requestId = id, index = index, data = Convert.ToBase64String(buffer, 0, count) });
-                                if (await Task.WhenAny(acknowledgement.Task, Task.Delay(15000)) != acknowledgement.Task) throw new TimeoutException("The panel stopped receiving the package. Return to the upload form and try again.");
-                                await acknowledgement.Task;
-                                index++;
-                            }
-                        }
-                        Send(new { type = "aerovault:file-complete", requestId = id });
-                        status.Text = "Package prepared. Review the change notes and choose Upload or Check in to save it to the team workspace.";
+                        var model = application.ActiveDoc as IModelDoc2;
+                        if (model == null) throw new InvalidOperationException("Open and save a design first.");
+                        var paths = CadFiles.Dependencies(model);
+                        string stamp = SyncState.Stamp(paths);
+                        collecting = true;
+                        try { file = CadFiles.PackageDesign(application, model); } finally { collecting = false; }
+                        if (SyncState.Stamp(paths) != stamp) throw new InvalidOperationException("The design changed while packaging. Prepare it again.");
+                        preparedDesigns.Clear();
+                        preparedDesigns[id] = new PreparedDesign { Root = model.GetPathName(), Paths = paths, Stamp = stamp };
+                        await SendFile(file, id, null);
+                        status.Text = "Review and upload this design once. Later saves will sync automatically.";
                     }
                     finally
                     {
-                        packaging = false;
-                        acknowledgement = null;
-                        transferId = null;
+                        packaging = false; acknowledgement = null; transferId = null;
                         if (file != null) { try { Directory.Delete(Path.GetDirectoryName(file), true); } catch { } }
                     }
                     return;
@@ -185,12 +196,45 @@ namespace AeroVault.SolidWorks
                     if (packaging) throw new InvalidOperationException("Wait for the current package to finish.");
                     if (!Guid.TryParse(command.revisionId, out parsed)) throw new InvalidOperationException("Invalid revision identifier.");
                     string url = Home + "/api/download?id=" + Uri.EscapeDataString(command.revisionId);
-                    openRequests[url] = command.readOnly;
+                    openRequests[url] = command;
                     status.Text = "Downloading the selected revision…";
                     browser.CoreWebView2.Navigate(url);
                 }
             }
-            catch (Exception ex) { Report(id, ex.Message); }
+            catch (Exception ex) { if (command != null && command.type == "aerovault:open-revision") EndOpening(command); Report(id, ex.Message); }
+        }
+
+        private void EndOpening(BridgeCommand command)
+        {
+            if (command != null && !command.readOnly && CanSend)
+                Send(new { type = "aerovault:ended", packageId = command.packageId, session = command.session });
+        }
+
+        private async Task SendFile(string file, string id, DesignLink automatic)
+        {
+            string transferOwner = ownerId;
+            if (!bridgeReady || (automatic != null && automatic.OwnerId != transferOwner)) throw new InvalidOperationException("Sign in with the account that owns this local design link.");
+            long size = new FileInfo(file).Length;
+            Send(new { type = "aerovault:file-begin", requestId = id, name = Path.GetFileName(file), size = size,
+                automatic = automatic != null, packageId = automatic == null ? null : automatic.PackageId,
+                session = automatic == null ? null : automatic.Session, version = automatic == null ? 0 : automatic.PendingVersion,
+                packageName = automatic == null ? null : automatic.Name, subsystem = automatic == null ? null : automatic.Subsystem });
+            using (FileStream stream = File.OpenRead(file))
+            {
+                byte[] buffer = new byte[384 * 1024];
+                int count, index = 0;
+                while ((count = stream.Read(buffer, 0, buffer.Length)) > 0)
+                {
+                    if (!bridgeReady || ownerId != transferOwner) throw new InvalidOperationException("The signed-in account changed. The local snapshot is retained.");
+                    transferId = id; transferIndex = index;
+                    acknowledgement = new TaskCompletionSource<bool>();
+                    Send(new { type = "aerovault:file-chunk", requestId = id, index = index, data = Convert.ToBase64String(buffer, 0, count) });
+                    if (await Task.WhenAny(acknowledgement.Task, Task.Delay(15000)) != acknowledgement.Task) throw new TimeoutException("The panel stopped receiving the package. It will retry when connected.");
+                    await acknowledgement.Task;
+                    index++;
+                }
+            }
+            Send(new { type = "aerovault:file-complete", requestId = id });
         }
 
         private void OnDownload(object sender, CoreWebView2DownloadStartingEventArgs e)
@@ -204,8 +248,9 @@ namespace AeroVault.SolidWorks
                 string extension = Path.GetExtension(name).ToLowerInvariant();
                 if (extension != ".zip" && CadFiles.DocumentType(name) == 0) { e.Cancel = true; Report(null, "This download is not a supported design file."); return; }
                 if (name.IndexOfAny(Path.GetInvalidFileNameChars()) >= 0) { e.Cancel = true; return; }
-                bool readOnly = true, requested;
-                if (openRequests.TryGetValue(operation.Uri, out requested)) { readOnly = requested; openRequests.Remove(operation.Uri); }
+                bool readOnly = true;
+                BridgeCommand requested = null;
+                if (openRequests.TryGetValue(operation.Uri, out requested)) { readOnly = requested.readOnly; openRequests.Remove(operation.Uri); }
                 string folder = Path.Combine(CadFiles.LocalRoot, "Downloads", Guid.NewGuid().ToString("N"));
                 Directory.CreateDirectory(folder);
                 string file = Path.Combine(folder, name);
@@ -219,7 +264,7 @@ namespace AeroVault.SolidWorks
                     operation.StateChanged -= stateChanged;
                     operation.BytesReceivedChanged -= bytesChanged;
                     if (stopped) return;
-                    if (operation.State != CoreWebView2DownloadState.Completed) { Report(null, "Download interrupted. Your cloud revision is unchanged; try again."); return; }
+                    if (operation.State != CoreWebView2DownloadState.Completed) { EndOpening(requested); Report(null, "Download interrupted. Your cloud revision is unchanged; try again."); return; }
                     try
                     {
                         if (new FileInfo(file).Length > CadFiles.MaximumBytes) throw new InvalidDataException("The download exceeds 50 MB.");
@@ -236,15 +281,27 @@ namespace AeroVault.SolidWorks
                             {
                                 using (var picker = new OpenFileDialog { InitialDirectory = extracted, Title = "Choose the top-level assembly or design to open", Filter = "SolidWorks designs|*.sldasm;*.sldprt;*.slddrw", CheckFileExists = true, RestoreDirectory = true })
                                 {
-                                    if (picker.ShowDialog(this) != DialogResult.OK) { status.Text = "Download saved. No design was opened."; return; }
+                                    if (picker.ShowDialog(this) != DialogResult.OK) { EndOpening(requested); status.Text = "Download saved. No design was opened."; return; }
                                     chosen = picker.FileName;
+                                    if (!Path.GetFullPath(chosen).StartsWith(Path.GetFullPath(extracted) + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase))
+                                        throw new InvalidOperationException("Choose a design inside this downloaded package.");
                                 }
                             }
                         }
                         CadFiles.Open(application, chosen, readOnly);
-                        status.Text = readOnly ? "Opened read-only. Check out the latest revision in Aero Vault before editing." : "Opened for editing. Save your changes, then check in a new package.";
+                        if (!readOnly && requested != null)
+                        {
+                            var model = CadFiles.FindOpen(application, chosen);
+                            if (model == null) throw new InvalidOperationException("The downloaded design did not open at its expected path.");
+                            string[] paths = CadFiles.Dependencies(model);
+                            string safeRoot = Path.GetFullPath(folder) + Path.DirectorySeparatorChar;
+                            if (paths.Any(path => !Path.GetFullPath(path).StartsWith(safeRoot, StringComparison.OrdinalIgnoreCase)))
+                                throw new InvalidOperationException("Some design references resolve outside this download. Close original same-named parts, reopen the downloaded assembly, and verify references before enabling sync.");
+                            AddLink(requested, chosen, paths, SyncState.Stamp(paths));
+                        }
+                        status.Text = readOnly ? "Opened read-only." : "Editing status is automatic. Save in SOLIDWORKS to upload a new revision.";
                     }
-                    catch (Exception ex) { Report(null, ex.Message); }
+                    catch (Exception ex) { EndOpening(requested); Report(null, ex.Message); }
                 };
                 operation.BytesReceivedChanged += bytesChanged;
                 operation.StateChanged += stateChanged;
@@ -254,7 +311,7 @@ namespace AeroVault.SolidWorks
 
         protected override void Dispose(bool disposing)
         {
-            if (disposing) { stopped = true; CancelTransfer(); if (browser != null) browser.Dispose(); }
+            if (disposing) { stopped = true; DisposeSync(); CancelTransfer(); if (browser != null) browser.Dispose(); }
             base.Dispose(disposing);
         }
     }
