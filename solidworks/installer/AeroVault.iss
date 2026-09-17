@@ -96,7 +96,7 @@ end;
 function NextButtonClick(CurPageID: Integer): Boolean;
 begin
   Result := True;
-  if CurPageID = SolidWorksPage.ID then begin
+  if (CurPageID = SolidWorksPage.ID) and not WizardSilent then begin
     Result := FileExists(AddBackslash(SolidWorksPage.Values[0]) + 'SLDWORKS.exe');
     if not Result then MsgBox('Select the folder containing SLDWORKS.exe.', mbError, MB_OK);
   end;
@@ -134,7 +134,7 @@ end;
 function InitializeUninstall: Boolean;
 begin
   Result := not SolidWorksRunning;
-  if not Result then MsgBox('Close SOLIDWORKS before uninstalling Aero Vault.', mbError, MB_OK);
+  if not Result then SuppressibleMsgBox('Close SOLIDWORKS before uninstalling Aero Vault.', mbError, MB_OK, IDOK);
 end;
 
 procedure CurUninstallStepChanged(CurUninstallStep: TUninstallStep);

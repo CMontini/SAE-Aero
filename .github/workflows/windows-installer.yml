@@ -10,7 +10,7 @@ permissions:
   contents: write
 concurrency:
   group: aerovault-windows-installer
-  cancel-in-progress: false
+  cancel-in-progress: true
 jobs:
   installer:
     runs-on: windows-2022
@@ -38,6 +38,7 @@ jobs:
           }
           .\solidworks\installer\Build-Installer.ps1 -Version $env:INSTALLER_VERSION
       - name: Verify missing-SOLIDWORKS failure leaves no installed add-in
+        timeout-minutes: 2
         shell: powershell
         run: |
           $ErrorActionPreference = 'Stop'
