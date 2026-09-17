@@ -38,3 +38,19 @@ catch {
     throw new HttpError(400, 'Send valid request details.');
 } if (!b || typeof b !== 'object' || Array.isArray(b))
     throw new HttpError(400, 'Send valid request details.'); return b as Record<string, any>; }
+// Original subsystem strings are stable identifiers used by installed add-ins.
+// Rename only their display labels, so old links and queued saves remain valid.
+export async function subsystemNames() {
+    const row = await database().prepare("SELECT value,revision FROM workspace_settings WHERE id='subsystems'").first<{value:string;revision:number}>();
+    const labels: Record<string,string> = Object.fromEntries(SUBSYSTEMS.map(id => [id,id]));
+    if (row) {
+        const saved = JSON.parse(row.value);
+        for (const id of SUBSYSTEMS) if (typeof saved[id] === 'string') labels[id] = saved[id];
+    }
+    return { labels, revision: row?.revision || 0 };
+}
+export function displayName(input: unknown, max = 100) {
+    const name = value(input, 'name', max);
+    if (/[\x00-\x1f\x7f]/.test(name)) throw new HttpError(400, 'Use a name without line breaks or control characters.');
+    return name;
+}

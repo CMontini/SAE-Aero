@@ -39,6 +39,7 @@ const BUCKET = { async put(k, b) { const bytes = new Uint8Array(await new Respon
 let vault;
 function compile(path) { const out = ts.transpileModule(fs.readFileSync(path, 'utf8'), { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText; const module = { exports: {} }; new Function('require', 'module', 'exports', out)(name => name === 'cloudflare:workers' ? { env: { DB, BUCKET } } : name === '@/app/chatgpt-auth' ? { getChatGPTUser: async () => identity.getStore() || null } : name === '@/lib/vault' ? vault : require(name), module, module.exports); return module.exports; }
 vault = compile('lib/vault.ts');
+const subsystems = compile('app/api/subsystems/route.ts');
 const workspace = compile('app/api/workspace/route.ts'), packages = compile('app/api/packages/route.ts'), members = compile('app/api/members/route.ts'), download = compile('app/api/download/route.ts');
 const admin = { userId: 'admin', email: 'admin@example.test', displayName: 'Admin' }, editor = { userId: 'editor', email: 'editor@example.test', displayName: 'Editor' }, viewer = { userId: 'viewer', email: 'viewer@example.test', displayName: 'Viewer' }, outsider = { userId: 'outsider', email: 'outsider@example.test', displayName: 'Outsider' };
 function call(route, user, body, query = '', raw = false, origin = 'https://vault.test') { return identity.run(user, () => { const headers = { origin }; if (body !== undefined) {
@@ -60,6 +61,21 @@ function upload(user, id, base, content = 'test CAD package', filename = 'wing.z
         assert.equal((await call(members, admin, { name: u.displayName, email: u.email, role })).status, 200);
         assert.equal((await call(workspace, u, { action: 'join' })).status, 200);
     }
+    const renameFolder = (user, id, name, revision) => call(subsystems, user, {id,name,revision});
+    assert.equal((await renameFolder(outsider, 'Wings', 'Wing structures', 0)).status,403);
+    assert.equal((await renameFolder(editor, 'Wings', 'Wing structures', 0)).status,403);
+    assert.equal((await renameFolder(viewer, 'Wings', 'Wing structures', 0)).status,403);
+    assert.equal((await renameFolder(admin, 'Wings', 'fuselage', 0)).status,400);
+    assert.equal((await renameFolder(admin, 'Wings', 'All subsystems', 0)).status,400);
+    assert.equal((await renameFolder(admin, 'Wings', 'bad\nname', 0)).status,400);
+    assert.equal((await renameFolder(admin, 'Wings', 'Wing structures', 0)).status,200);
+    assert.equal((await renameFolder(admin, 'Fuselage', 'Airframe', 0)).status,409);
+    const folderNames = (await (await call(workspace, viewer)).json()).subsystems;
+    assert.equal(folderNames.labels.Wings,'Wing structures');
+    assert.equal(folderNames.labels.Fuselage,'Fuselage');
+    assert.equal(folderNames.revision,1);
+    const folderRace = await Promise.all([renameFolder(admin,'Fuselage','Airframe',1),renameFolder(admin,'Propulsion','Powertrain',1)]);
+    assert.deepEqual(folderRace.map(r=>r.status).sort(),[200,409]);
     assert.equal((await upload(viewer)).status, 403);
     assert.equal((await upload(admin, null, null, 'data', 'bad.exe')).status, 400);
     const first = await upload(admin);
@@ -87,11 +103,23 @@ function upload(user, id, base, content = 'test CAD package', filename = 'wing.z
     assert.equal((await upload(other, id, 1)).status, 409);
     assert.equal((await upload(holder, id, 1)).status, 409); // browser cannot impersonate native session
     assert.equal((await upload(holder, id, 0, 'stale', 'wing.zip', session)).status, 409);
+    const renamePackage = (user, name, previousName) => call(packages,user,{action:'rename',id,name,previousName});
+    const original = sqlite.prepare('SELECT * FROM packages WHERE id=?').get(id);
+    assert.equal((await renamePackage(viewer,'New wing','Main wing')).status,403);
+    assert.equal((await renamePackage(holder,'   ','Main wing')).status,400);
+    assert.equal((await renamePackage(holder,'Main wing assembly','Main wing')).status,200);
+    assert.equal((await renamePackage(other,'Stale name','Main wing')).status,409);
+    const renamed = sqlite.prepare('SELECT * FROM packages WHERE id=?').get(id);
+    assert.equal(renamed.name,'Main wing assembly');
+    for (const key of ['id','version','current_version_id','subsystem','locked_by','lock_token','locked_at','status']) assert.equal(renamed[key],original[key]);
+    assert.equal(renamed.subsystem,'Wings'); // Stable ID despite the renamed folder.
+    assert.equal(files.size,1);
     const op = crypto.randomUUID();
     const saves = await Promise.all([upload(holder, id, 1, 'save A', 'wing.zip', session, op), upload(holder, id, 1, 'save A', 'wing.zip', session, op)]);
     assert.deepEqual(saves.map(r => r.status), [200, 200]);
     assert.equal(sqlite.prepare('SELECT COUNT(*) AS n FROM versions').get().n, 2);
     assert.equal(files.size, 2);
+    assert.equal(sqlite.prepare('SELECT name FROM packages WHERE id=?').get(id).name,'Main wing assembly'); // Old native name cannot undo a rename.
     assert.equal(sqlite.prepare('SELECT locked_by FROM packages').get().locked_by, holder.userId);
     assert.equal((await upload(holder, id, 1, 'different', 'wing.zip', session, op)).status, 409);
     assert.equal(await (await call(download, viewer, undefined, '?id=' + v1)).text(), 'test CAD package');
@@ -128,5 +156,5 @@ function upload(user, id, base, content = 'test CAD package', filename = 'wing.z
     for (let i = 0; i < 6; i++)
         assert.equal((await call(members, admin, { name: 'Member ' + i, email: `m${i}@example.test`, role: 'editor' })).status, 200);
     assert.equal((await call(members, admin, { name: 'Too many', email: 'extra@example.test', role: 'editor' })).status, 409);
-    console.log('PASS: authorization, 9-person limit, editing presence, session expiry, second-device conflicts, close/reopen races, automatic save retries, concurrent revisions, mid-upload session changes, immutable history, manual updates, and status approval.');
+    console.log('PASS: persistent folder labels, rename permissions and conflicts, unchanged sync identity and CAD bytes, authorization, 9-person limit, editing presence, session expiry, second-device conflicts, close/reopen races, automatic save retries, concurrent revisions, mid-upload session changes, immutable history, manual updates, and status approval.');
 })().catch(e => { console.error(e); process.exitCode = 1; });

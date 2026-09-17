@@ -1,4 +1,4 @@
-import { payload, database, bucket, member, writable, administrator, mutation, value, event, failure, HttpError, SUBSYSTEMS, MAX_BYTES } from '@/lib/vault';
+import { payload, database, bucket, member, writable, administrator, mutation, value, event, failure, HttpError, displayName, SUBSYSTEMS, MAX_BYTES } from '@/lib/vault';
 const TTL = 120000;
 const uuid = (v: unknown) => typeof v === 'string' && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(v);
 export async function POST(request: Request) {
@@ -86,6 +86,15 @@ export async function POST(request: Request) {
         const b = await payload(request), id = value(b.id, 'package ID');
         const p = await db.prepare('SELECT * FROM packages WHERE id=?').bind(id).first<any>();
         if (!p) throw new HttpError(404, 'Package not found.');
+        if (b.action === 'rename') {
+            const name = displayName(b.name), previous = value(b.previousName, 'previous name', 100);
+            if (p.name === name) return Response.json({ ok: true });
+            const result = await db.prepare('UPDATE packages SET name=?,updated_at=? WHERE id=? AND name=?')
+                .bind(name, now, id, previous).run();
+            if (!result.meta.changes) throw new HttpError(409, 'This package was renamed by someone else. Close this dialog and try again.');
+            await event(m.name, `renamed ${previous} to ${name}`, id).run().catch(() => {});
+            return Response.json({ ok: true });
+        }
         if (b.action === 'editing') {
             if (!uuid(b.session) || !Number.isInteger(b.base) || b.base < 1) throw new HttpError(400, 'Invalid editing session.');
             const r = await db.prepare('UPDATE packages SET locked_by=?,lock_token=?,locked_at=? WHERE id=? AND version=? AND (locked_by IS NULL OR locked_at<=? OR (locked_by=? AND lock_token=?))').bind(m.user_id, b.session, now, id, b.base, cutoff, m.user_id, b.session).run();

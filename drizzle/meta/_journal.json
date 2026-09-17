@@ -8,6 +8,13 @@
       "when": 1789583459811,
       "tag": "0000_blue_purifiers",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "6",
+      "when": 1789673410865,
+      "tag": "0001_mighty_bug",
+      "breakpoints": true
     }
   ]
 }
