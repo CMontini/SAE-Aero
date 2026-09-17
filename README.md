@@ -35,6 +35,7 @@ pnpm dev
 pnpm build
 node tests/vault.test.cjs
 node tests/native-transfer.test.cjs
+node tests/upload-worker.test.cjs
 pnpm exec tsc --noEmit
 ```
 
@@ -49,7 +50,7 @@ Schema changes: update db/schema.ts, run `pnpm db:generate`, inspect the new SQL
 - Packages are intentionally independent. Shared parts used by multiple packages require team coordination; filenames alone do not link packages together.
 - Revisions preserve old files, but automated backup/export and recovery drills remain pilot-readiness work.
 - No automated membership removal or admin transfer UI yet. Complete those before routine team use.
-- Real SolidWorks assemblies and two separate hosted user accounts still need to be tested. Integration tests verify the route logic using actual SQLite and an in-memory R2 adapter; they do not verify the live identity gateway or CAD compatibility.
+- Real SolidWorks assemblies and two separate hosted user accounts still need to be tested. Integration tests verify route logic using SQLite and an in-memory R2 adapter. The upload regression test also runs the actual upload route in workerd with local D1/R2, checking streamed uploads, retries, and invalid-length cleanup. These tests do not verify the live identity gateway or CAD compatibility.
 - Optional WebMCP subsystem navigation is feature-detected; live WebMCP validation has not been performed.
 
 ## Hosting and GitHub

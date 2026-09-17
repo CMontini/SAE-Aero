@@ -46,13 +46,20 @@ export async function POST(request: Request) {
             // Separate object keys even for simultaneous retries of the same operation.
             const key = `packages/${id}/${versionId}/${crypto.randomUUID()}`;
             stored = key;
-            let received = 0;
-            const bounded = request.body.pipeThrough(new TransformStream<Uint8Array, Uint8Array>({ transform(chunk, controller) {
-                received += chunk.byteLength;
-                if (received > length) throw new Error('Upload exceeds declared size.');
-                controller.enqueue(chunk);
-            }}));
-            await bucket().put(key, bounded, { httpMetadata: { contentType: 'application/octet-stream' } });
+            // R2 requires a known-length stream. A generic TransformStream loses
+            // that metadata; FixedLengthStream also rejects short or excess data.
+            const bounded = new FixedLengthStream(length);
+            const controller = new AbortController();
+            const pumping = request.body.pipeTo(bounded.writable, { signal: controller.signal });
+            const writing = Promise.resolve().then(() => bucket().put(key, bounded.readable, { httpMetadata: { contentType: 'application/octet-stream' } }));
+            try {
+                await Promise.all([pumping, writing]);
+            } catch (error) {
+                controller.abort(error);
+                // Finish both operations before the outer catch removes the object.
+                await Promise.allSettled([pumping, writing]);
+                throw error;
+            }
             const object = await bucket().head(key);
             if (!object || object.size !== length) throw new HttpError(400, 'The upload was incomplete. Please try again.');
             if (p) {

@@ -5,6 +5,17 @@ const { DatabaseSync } = require('node:sqlite');
 const { AsyncLocalStorage } = require('node:async_hooks');
 const fs = require('node:fs');
 const ts = require('typescript');
+// Node adapter only; upload-worker.test.cjs verifies the native workerd/R2 contract.
+globalThis.FixedLengthStream = class extends TransformStream {
+    constructor(length) {
+        let received = 0;
+        super({ transform(chunk, controller) {
+            received += chunk.byteLength;
+            if (received > length) throw new Error('Excess upload bytes');
+            controller.enqueue(chunk);
+        }, flush() { if (received !== length) throw new Error('Incomplete upload'); } });
+    }
+};
 const identity = new AsyncLocalStorage();
 const sqlite = new DatabaseSync(':memory:');
 sqlite.exec('PRAGMA foreign_keys=ON');
