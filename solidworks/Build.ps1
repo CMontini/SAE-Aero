@@ -62,5 +62,12 @@ $test = Join-Path $output 'ArchiveTests.exe'
 if ($LASTEXITCODE -ne 0) { throw 'Archive test compilation failed.' }
 & $test
 if ($LASTEXITCODE -ne 0) { throw 'Archive safety tests failed. Do not install this build.' }
-Set-Content -LiteralPath $buildMarker -Value 'Build and archive tests passed.'
-Write-Host "Build and archive tests passed. Next run Install.ps1 from Windows PowerShell as administrator. Output: $output"
+
+# Verify actual COM interface exposure before another SOLIDWORKS load attempt.
+$callbackTest = Join-Path $output 'CallbackTests.exe'
+& $compiler /nologo /target:exe /platform:anycpu /langversion:5 ("/out:" + $callbackTest) /reference:System.dll ("/reference:" + (Join-Path $output 'AeroVault.AddIn.dll')) ("/reference:" + (Join-Path $output 'SolidWorks.Interop.swpublished.dll')) (Join-Path $PSScriptRoot 'tests\CallbackTests.cs')
+if ($LASTEXITCODE -ne 0) { throw 'Callback test compilation failed.' }
+& $callbackTest
+if ($LASTEXITCODE -ne 0) { throw 'COM callback interface tests failed. Do not install this build.' }
+Set-Content -LiteralPath $buildMarker -Value 'Build, archive, and COM callback tests passed.'
+Write-Host "Build, archive, and COM callback tests passed. Next run Install.ps1 from Windows PowerShell as administrator. Output: $output"

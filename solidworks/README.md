@@ -1,4 +1,4 @@
-# Aero Vault inside SOLIDWORKS — pilot 0.2
+# Aero Vault inside SOLIDWORKS — pilot 0.2.2
 
 This adds an Aero Vault tab to the SOLIDWORKS Task Pane. It uses your existing cloud workspace, login, packages, checkout, and revision history. The browser app remains available at https://aero-vault.carson-montini.chatgpt.site.
 
@@ -36,7 +36,7 @@ You need:
    powershell.exe -NoProfile -ExecutionPolicy RemoteSigned -File .\Build.ps1
    ```
 
-   This uses the installed .NET compiler, downloads Microsoft WebView2 SDK 1.0.3405.78 from NuGet, builds the DLL, and runs Windows ZIP safety tests. It does not register anything. Continue only after **Build and archive tests passed**. If SOLIDWORKS is in a different folder:
+   This uses the installed .NET compiler, downloads Microsoft WebView2 SDK 1.0.3405.78 from NuGet, builds the DLL, and runs Windows ZIP safety and COM callback interface tests. It does not register anything. Continue only after **Build, archive, and COM callback tests passed**. If SOLIDWORKS is in a different folder:
 
    ```powershell
    powershell.exe -NoProfile -ExecutionPolicy RemoteSigned -File .\Build.ps1 -SolidWorksDirectory "C:\Program Files\SOLIDWORKS Corp\SOLIDWORKS"
@@ -81,3 +81,7 @@ To disable: uncheck Aero Vault in **Tools → Add-Ins**. To uninstall: close SOL
 `AeroVault.AddIn/AddIn.cs` owns COM registration and Task Pane lifecycle. `VaultPanel.cs` hosts WebView2 and the restricted message bridge. `CadFiles.cs` calls SOLIDWORKS Pack and Go and OpenDoc6. `SafeArchive.cs` extracts downloaded ZIPs. `tests/ArchiveTests.cs` exercises the actual extractor on Windows during Build.ps1. The website hook is `app/native/use-solidworks.ts`; bounded transfer logic and its Node tests are in `lib/native-transfer.ts` and `tests/native-transfer.test.cjs`.
 
 References: [SOLIDWORKS API Help](https://help.solidworks.com/2026/english/api/sldworksapiprogguide/Welcome.htm), [WebView2 security guidance](https://learn.microsoft.com/en-us/microsoft-edge/webview2/concepts/security), [pinned Microsoft WebView2 SDK](https://www.nuget.org/packages/Microsoft.Web.WebView2/1.0.3405.78).
+
+## Callback registration fix (0.2.2)
+
+If diagnostic 0.2.1 reports `Register the SOLIDWORKS add-in callback` with HRESULT `0x80004002`, update the source and rebuild. The add-in now exposes an explicit default IDispatch callback interface alongside ISwAddin. Build.ps1 tests COM interface exposure on the actual compiled DLL before writing the successful-build marker. This catches the missing-interface failure without launching SOLIDWORKS. Registration inside SOLIDWORKS and subsequent panel startup still require a real-machine test. Close SOLIDWORKS completely before rebuilding and reinstalling so it releases the previously loaded DLL.

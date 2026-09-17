@@ -10,20 +10,34 @@ using SolidWorks.Interop.swpublished;
 
 [assembly: AssemblyTitle("Aero Vault for SOLIDWORKS")]
 [assembly: AssemblyVersion("0.2.0.0")]
-[assembly: AssemblyFileVersion("0.2.1.0")]
+[assembly: AssemblyFileVersion("0.2.2.0")]
 [assembly: ComVisible(false)]
 
 namespace AeroVault.SolidWorks
 {
+    // SetAddinCallbackInfo2 marshals the callback object as IDispatch.
+    // ISwAddin supplies the lifecycle interface, but is not our dispatch contract.
+    [ComVisible(true)]
+    [Guid("2EA82EFA-CF98-4605-A864-CF9A74A17F82")]
+    [InterfaceType(ComInterfaceType.InterfaceIsIDispatch)]
+    public interface IAeroVaultCallbacks
+    {
+        [DispId(1)]
+        int GetCallbackProtocolVersion();
+    }
+
     [ComVisible(true)]
     [Guid("F36E6671-8086-49B1-BD0A-FB8C8DB95072")]
     [ProgId("AeroVault.SolidWorks.AddIn")]
     [ClassInterface(ClassInterfaceType.None)]
-    public sealed class AddIn : ISwAddin
+    [ComDefaultInterface(typeof(IAeroVaultCallbacks))]
+    public sealed class AddIn : ISwAddin, IAeroVaultCallbacks
     {
         private ISldWorks application;
         private ITaskpaneView pane;
         private VaultPanel panel;
+
+        public int GetCallbackProtocolVersion() { return 1; }
 
         public bool ConnectToSW(object thisSw, int cookie)
         {
@@ -59,7 +73,7 @@ namespace AeroVault.SolidWorks
                 DisconnectFromSW();
                 MessageBox.Show("Step: " + stage + "\n\n" + ex.GetType().Name + ": " + ex.Message +
                     "\nHRESULT: 0x" + ex.HResult.ToString("X8") + "\n\n" + details,
-                    "Aero Vault could not load (diagnostic 0.2.1)", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                    "Aero Vault could not load (diagnostic 0.2.2)", MessageBoxButtons.OK, MessageBoxIcon.Error);
                 return false;
             }
         }
@@ -71,7 +85,7 @@ namespace AeroVault.SolidWorks
                 string folder = Path.Combine(System.Environment.GetFolderPath(System.Environment.SpecialFolder.LocalApplicationData), "AeroVault", "Logs");
                 Directory.CreateDirectory(folder);
                 string path = Path.Combine(folder, "startup-error.txt");
-                string report = "Aero Vault startup diagnostic 0.2.1\r\n" + DateTime.UtcNow.ToString("O") +
+                string report = "Aero Vault startup diagnostic 0.2.2\r\n" + DateTime.UtcNow.ToString("O") +
                     "\r\nStep: " + stage + "\r\nCLR: " + System.Environment.Version +
                     "\r\nProcess bits: " + (IntPtr.Size * 8) +
                     "\r\nArchitecture: " + System.Environment.GetEnvironmentVariable("PROCESSOR_ARCHITECTURE") +
