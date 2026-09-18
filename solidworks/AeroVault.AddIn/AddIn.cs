@@ -10,7 +10,7 @@ using SolidWorks.Interop.swpublished;
 
 [assembly: AssemblyTitle("Aero Vault for SOLIDWORKS")]
 [assembly: AssemblyVersion("0.2.0.0")]
-[assembly: AssemblyFileVersion("0.3.0.0")]
+[assembly: AssemblyFileVersion("0.4.0.0")]
 [assembly: ComVisible(false)]
 
 namespace AeroVault.SolidWorks
@@ -73,7 +73,7 @@ namespace AeroVault.SolidWorks
                 DisconnectFromSW();
                 MessageBox.Show("Step: " + stage + "\n\n" + ex.GetType().Name + ": " + ex.Message +
                     "\nHRESULT: 0x" + ex.HResult.ToString("X8") + "\n\n" + details,
-                    "Aero Vault could not load (diagnostic 0.3.0)", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                    "Aero Vault could not load (diagnostic 0.4.0)", MessageBoxButtons.OK, MessageBoxIcon.Error);
                 return false;
             }
         }
@@ -85,7 +85,7 @@ namespace AeroVault.SolidWorks
                 string folder = Path.Combine(System.Environment.GetFolderPath(System.Environment.SpecialFolder.LocalApplicationData), "AeroVault", "Logs");
                 Directory.CreateDirectory(folder);
                 string path = Path.Combine(folder, "startup-error.txt");
-                string report = "Aero Vault startup diagnostic 0.3.0\r\n" + DateTime.UtcNow.ToString("O") +
+                string report = "Aero Vault startup diagnostic 0.4.0\r\n" + DateTime.UtcNow.ToString("O") +
                     "\r\nStep: " + stage + "\r\nCLR: " + System.Environment.Version +
                     "\r\nProcess bits: " + (IntPtr.Size * 8) +
                     "\r\nArchitecture: " + System.Environment.GetEnvironmentVariable("PROCESSOR_ARCHITECTURE") +

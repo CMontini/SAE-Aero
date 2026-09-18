@@ -15,7 +15,7 @@ One person edits each package at a time; other teammates can open a read-only co
 
 ## Install with Windows Setup (recommended)
 
-Download **AeroVault-Setup-0.3.1.exe** from the [latest Windows installer release](https://github.com/CMontini/SAE-Aero/releases/latest). Run it in Windows after closing SOLIDWORKS. Approve the administrator prompt and choose **Install**. If SOLIDWORKS is in a custom location, select the folder containing `SLDWORKS.exe` when asked.
+Download **AeroVault-Setup-0.4.0.exe** from the [latest Windows installer release](https://github.com/CMontini/SAE-Aero/releases/latest). Run it in Windows after closing SOLIDWORKS. Approve the administrator prompt and choose **Install**. If SOLIDWORKS is in a custom location, select the folder containing `SLDWORKS.exe` when asked.
 
 Setup bundles the add-in source and pinned WebView2 SDK, builds against the installed SOLIDWORKS API, runs the Windows tests, copies the tested DLLs, and registers the add-in. No PowerShell commands, Visual Studio, or separate SDK installation are required. It installs Microsoft's WebView2 Runtime if needed; that step requires internet. .NET Framework 4.8 or later must be installed (included with Windows 11).
 
@@ -89,3 +89,7 @@ To disable, uncheck Aero Vault in Tools → Add-Ins. To uninstall, close SOLIDWO
 The **Build Windows installer** GitHub Actions workflow runs when native add-in or installer files change on `main`, or through **Run workflow**. It publishes an EXE and SHA-256 checksum to GitHub Releases after its checks pass. It does not deploy or change the website.
 
 Maintainers can also run `solidworks/installer/Build-Installer.ps1` on Windows with Inno Setup 6 installed. The release process never uploads locally installed SOLIDWORKS assemblies or any CAD files. The install-time build uses each computer's own SOLIDWORKS API. Installer source is in `solidworks/installer/`.
+
+## Aircraft assemblies
+
+See [Main Assemblies setup and behavior](ASSEMBLIES.md) for tracked dependencies, SAEAEROMAIN, and queued rebuilds. This feature requires a SolidWorks workstation acceptance check.

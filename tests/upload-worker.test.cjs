@@ -8,7 +8,7 @@ const { Miniflare } = createRequire(require.resolve('wrangler/package.json'))('m
 function source(path) {
     return ts.transpileModule(fs.readFileSync(path, 'utf8'), {
         compilerOptions: { module: ts.ModuleKind.ESNext, target: ts.ScriptTarget.ES2022 }
-    }).outputText.replaceAll('@/lib/vault', './vault.js').replaceAll('@/app/chatgpt-auth', './auth.js');
+    }).outputText.replaceAll('@/lib/vault', './vault.js').replaceAll('@/lib/assemblies', './assemblies.js').replaceAll('@/app/chatgpt-auth', './auth.js');
 }
 const mf = new Miniflare({
     compatibilityDate: '2026-05-15', modulesRoot: '/',
@@ -29,6 +29,7 @@ const mf = new Miniflare({
                 }));
             }};` },
         { type: 'ESModule', path: '/route.js', contents: source('app/api/packages/route.ts') },
+        { type: 'ESModule', path: '/assemblies.js', contents: source('lib/assemblies.ts') },
         { type: 'ESModule', path: '/vault.js', contents: source('lib/vault.ts') },
         { type: 'ESModule', path: '/auth.js', contents: `export async function getChatGPTUser() { return {userId:'test-editor'}; }` }
     ], d1Databases: ['DB'], r2Buckets: ['BUCKET']

@@ -74,5 +74,6 @@ $syncTest = Join-Path $output 'SyncStateTests.exe'
 if ($LASTEXITCODE -ne 0) { throw 'Sync state test compilation failed.' }
 & $syncTest
 if ($LASTEXITCODE -ne 0) { throw 'Sync state tests failed. Do not install this build.' }
+& (Join-Path $PSScriptRoot 'tests\Test-AssemblyManifest.ps1')
 Set-Content -LiteralPath $buildMarker -Value 'Build and all Windows tests passed.'
 Write-Host "Build and all Windows tests passed. Next run Install.ps1 from Windows PowerShell as administrator. Output: $output"

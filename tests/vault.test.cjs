@@ -21,7 +21,7 @@ const sqlite = new DatabaseSync(':memory:');
 sqlite.exec('PRAGMA foreign_keys=ON');
 for (const f of fs.readdirSync('drizzle').filter(f => f.endsWith('.sql')).sort())
     sqlite.exec(fs.readFileSync('drizzle/' + f, 'utf8'));
-function statement(sql, args = []) { return { bind(...values) { return statement(sql, values); }, async first() { return sqlite.prepare(sql).get(...args) || null; }, async run() { return this.execute(); }, execute() { const s = sqlite.prepare(sql); if (/^\s*SELECT/i.test(sql))
+function statement(sql, args = []) { return { bind(...values) { return statement(sql, values); }, async all() { return this.execute(); }, async first() { return sqlite.prepare(sql).get(...args) || null; }, async run() { return this.execute(); }, execute() { const s = sqlite.prepare(sql); if (/^\s*SELECT/i.test(sql))
         return { results: s.all(...args), meta: { changes: 0 } }; const r = s.run(...args); return { results: [], meta: { changes: Number(r.changes) } }; } }; }
 ;
 const DB = { prepare: statement, async batch(list) { sqlite.exec('BEGIN'); try {
@@ -36,13 +36,14 @@ const DB = { prepare: statement, async batch(list) { sqlite.exec('BEGIN'); try {
 const files = new Map();
 let duringUpload = null;
 const BUCKET = { async put(k, b) { const bytes = new Uint8Array(await new Response(b).arrayBuffer()); files.set(k, bytes); if (duringUpload) { const hook = duringUpload; duringUpload = null; await hook(); } }, async head(k) { return files.has(k) ? { size: files.get(k).length } : null; }, async get(k) { const b = files.get(k); return b ? { body: b, size: b.length } : null; }, async delete(k) { files.delete(k); } };
-let vault;
-function compile(path) { const out = ts.transpileModule(fs.readFileSync(path, 'utf8'), { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText; const module = { exports: {} }; new Function('require', 'module', 'exports', out)(name => name === 'cloudflare:workers' ? { env: { DB, BUCKET } } : name === '@/app/chatgpt-auth' ? { getChatGPTUser: async () => identity.getStore() || null } : name === '@/lib/vault' ? vault : require(name), module, module.exports); return module.exports; }
+let vault, assemblies;
+function compile(path) { const out = ts.transpileModule(fs.readFileSync(path, 'utf8'), { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText; const module = { exports: {} }; new Function('require', 'module', 'exports', out)(name => name === 'cloudflare:workers' ? { env: { DB, BUCKET } } : name === '@/app/chatgpt-auth' ? { getChatGPTUser: async () => identity.getStore() || null } : name === '@/lib/vault' ? vault : name === '@/lib/assemblies' ? assemblies : require(name), module, module.exports); return module.exports; }
 vault = compile('lib/vault.ts');
+assemblies = compile('lib/assemblies.ts');
 const subsystems = compile('app/api/subsystems/route.ts');
 const workspace = compile('app/api/workspace/route.ts'), packages = compile('app/api/packages/route.ts'), members = compile('app/api/members/route.ts'), download = compile('app/api/download/route.ts');
 const admin = { userId: 'admin', email: 'admin@example.test', displayName: 'Admin' }, editor = { userId: 'editor', email: 'editor@example.test', displayName: 'Editor' }, viewer = { userId: 'viewer', email: 'viewer@example.test', displayName: 'Viewer' }, outsider = { userId: 'outsider', email: 'outsider@example.test', displayName: 'Outsider' };
-function call(route, user, body, query = '', raw = false, origin = 'https://vault.test') { return identity.run(user, () => { const headers = { origin }; if (body !== undefined) {
+function call(route, user, body, query = '', raw = false, origin = 'https://vault.test', extraHeaders = {}) { return identity.run(user, () => { const headers = { origin, ...extraHeaders }; if (body !== undefined) {
     headers['Content-Type'] = raw ? 'application/octet-stream' : 'application/json';
     headers['Content-Length'] = String(raw ? body.length : JSON.stringify(body).length);
 } const req = new Request('https://vault.test/api/test' + query, { method: body === undefined ? 'GET' : 'POST', headers, body: body === undefined ? undefined : raw ? body : JSON.stringify(body) }); return route[body === undefined ? 'GET' : 'POST'](req); }); }
@@ -89,7 +90,7 @@ function upload(user, id, base, content = 'test CAD package', filename = 'wing.z
     assert.equal((await renameFolder(admin,customSubsystem,'Electronics',3)).status,200);
     const createRace = await Promise.all([createFolder(admin,'Controls',4),createFolder(admin,'Payload',4)]);
     assert.deepEqual(createRace.map(r=>r.status).sort(),[200,409]);
-    assert.equal(Object.keys((await (await call(workspace,admin)).json()).subsystems.labels).length,7);
+    assert.equal(Object.keys((await (await call(workspace,admin)).json()).subsystems.labels).length,8);
     assert.equal((await upload(viewer)).status, 403);
     assert.equal((await upload(admin, null, null, 'data', 'bad.exe')).status, 400);
     const first = await upload(admin);
@@ -180,5 +181,48 @@ function upload(user, id, base, content = 'test CAD package', filename = 'wing.z
     assert.equal((await (await upload(editor,newId,1,'saved custom design','avionics.zip',customSession,customOperation,customSubsystem)).json()).replayed,true);
     assert.equal(sqlite.prepare('SELECT subsystem FROM packages WHERE id=?').get(newId).subsystem,customSubsystem);
     assert.equal((await upload(editor,null,null,'bytes','bad.zip',null,null,'unknown-subsystem')).status,400);
+    const manifest = (root, refs=[]) => ({protocol:1,root,files:[root,...new Set(refs.flatMap(r=>r.files))],refs});
+    const assemblyUpload = async (m,id=null,base=0,headers={},name='Assembly',subsystem='Wings',session=null) => {
+        const q=new URLSearchParams({action:'upload',filename:'design.zip',name,subsystem,note:'Assembly test'});
+        if(id){q.set('id',id);q.set('base',String(base));}if(session)q.set('session',session);
+        return call(packages,admin,'ZIP','?'+q,true,'https://vault.test',{'X-AeroVault-Manifest':encodeURIComponent(JSON.stringify(m)),...headers});
+    };
+    const mainFolder='system-main-assemblies';
+    assert.equal((await renameFolder(admin,mainFolder,'Rename system',6)).status,403);
+    assert.equal((await assemblyUpload(manifest('../bad.sldprt'))).status,400);
+    assert.equal((await assemblyUpload(manifest('CON.SLDPRT'))).status,400);
+    const partManifest=manifest('spar.SLDPRT');
+    const part=await (await assemblyUpload(partManifest)).json();assert.ok(part.id);
+    const ref={packageId:part.id,revision:1,root:partManifest.root,files:partManifest.files};
+    const wingManifest=manifest('Wing.SLDASM',[ref]);
+    const wingResponse=await assemblyUpload(wingManifest,null,0,{},'Wing',mainFolder);assert.equal(wingResponse.status,200,await wingResponse.clone().text());
+    const wing=await wingResponse.json();
+    const rootRef={packageId:wing.id,revision:1,root:wingManifest.root,files:wingManifest.files};
+    const masterManifest=manifest('SAEAEROMAIN.SLDASM',[rootRef]);
+    const masterResponse=await assemblyUpload(masterManifest,null,0,{},'SAEAEROMAIN',mainFolder);assert.equal(masterResponse.status,200,await masterResponse.clone().text());
+    const master=await masterResponse.json();
+    assert.equal((await assemblyUpload(masterManifest,null,0,{},'SAEAEROMAIN',mainFolder)).status,409);
+    assert.equal((await call(packages,admin,{action:'rename',id:master.id,name:'Other',previousName:'SAEAEROMAIN'})).status,403);
+    assert.equal((await assemblyUpload(manifest('newname.SLDPRT'),part.id,1)).status,409);
+    assert.equal((await assemblyUpload({...partManifest,refs:[{packageId:wing.id,revision:1,root:wingManifest.root,files:wingManifest.files}],files:[...wingManifest.files]},part.id,1)).status,400);
+    // A -> B -> A without relying on the overlapping-files rejection.
+    const a=await (await assemblyUpload(manifest('a.SLDASM'))).json();
+    const b=await (await assemblyUpload(manifest('b.SLDASM',[{packageId:a.id,revision:1,root:'a.SLDASM',files:['a.SLDASM']}]))).json();
+    const cycle=manifest('a.SLDASM',[{packageId:b.id,revision:1,root:'b.SLDASM',files:['b.SLDASM']}]);
+    assert.equal((await assemblyUpload(cycle,a.id,1)).status,409);
+    assert.equal((await assemblyUpload(partManifest,part.id,1)).status,200);
+    let plan=assemblies.assemblyPlans(await assemblies.assemblyRows());
+    assert.equal(plan.jobs.find(j=>j.packageId===wing.id).ready,true);
+    assert.equal(plan.jobs.find(j=>j.packageId===master.id).ready,false);
+    const updatedWing=manifest('Wing.SLDASM',[{...ref,revision:2}]);
+    duringUpload=async()=>{assert.equal((await assemblyUpload(partManifest,part.id,2)).status,200);};
+    assert.equal((await assemblyUpload(updatedWing,wing.id,1,{'X-AeroVault-Rebuild':'1'})).status,409);
+    assert.equal((await assemblyUpload(manifest('Wing.SLDASM',[{...ref,revision:3}]),wing.id,1,{'X-AeroVault-Rebuild':'1'})).status,200);
+    plan=assemblies.assemblyPlans(await assemblies.assemblyRows());
+    assert.equal(plan.jobs.find(j=>j.packageId===wing.id).needsUpdate,false);
+    assert.equal(plan.jobs.find(j=>j.packageId===master.id).ready,true);
+    const after=sqlite.prepare('SELECT COUNT(*) AS n FROM versions WHERE package_id=?').get(wing.id).n;
+    assert.equal(after,2); // Failed rebuild published no revision.
+    console.log('PASS: system folder protection, manifest validation, stable roots, single master, cycle rejection, dependency ordering, and mid-upload revision changes.');
     console.log('PASS: admin folder creation, duplicate names, concurrent creation, new-folder uploads/autosaves/retries, persistent folder labels, rename permissions and conflicts, unchanged sync identity and CAD bytes, authorization, 9-person limit, editing presence, session expiry, second-device conflicts, close/reopen races, automatic save retries, concurrent revisions, mid-upload session changes, immutable history, manual updates, and status approval.');
 })().catch(e => { console.error(e); process.exitCode = 1; });

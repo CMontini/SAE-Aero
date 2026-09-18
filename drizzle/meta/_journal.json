@@ -15,6 +15,20 @@
       "when": 1789673410865,
       "tag": "0001_mighty_bug",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "6",
+      "when": 1789682647419,
+      "tag": "0002_flaky_ezekiel",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "6",
+      "when": 1789705393555,
+      "tag": "0003_aberrant_squadron_sinister",
+      "breakpoints": true
     }
   ]
 }

@@ -10,6 +10,9 @@ namespace AeroVault.SolidWorks
 {
     public sealed class DesignLink
     {
+        public string Manifest { get; set; }
+        public string PendingManifest { get; set; }
+        public bool Rebuild { get; set; }
         public string PackageId { get; set; }
         public string OwnerId { get; set; }
         public string Root { get; set; }

@@ -1,0 +1,1 @@
+ALTER TABLE `packages` ADD `assembly_message` text;

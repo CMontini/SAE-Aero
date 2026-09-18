@@ -16,6 +16,8 @@ namespace AeroVault.SolidWorks
 {
     internal sealed class BridgeCommand
     {
+        public AssemblyManifest manifest { get; set; }
+        public AssemblyInput[] dependencies { get; set; }
         public string type { get; set; }
         public string requestId { get; set; }
         public string revisionId { get; set; }
@@ -41,7 +43,7 @@ namespace AeroVault.SolidWorks
         private readonly ISldWorks application;
         private readonly WebView2 browser;
         private readonly Label status;
-        private readonly JavaScriptSerializer json = new JavaScriptSerializer { MaxJsonLength = 1024 * 1024 };
+        private readonly JavaScriptSerializer json = new JavaScriptSerializer { MaxJsonLength = 4 * 1024 * 1024 };
         private readonly Dictionary<string, BridgeCommand> openRequests = new Dictionary<string, BridgeCommand>();
         private bool packaging;
         private bool stopped;
@@ -138,7 +140,7 @@ namespace AeroVault.SolidWorks
             try
             {
                 string raw = e.WebMessageAsJson;
-                if (raw.Length > 4096) throw new InvalidOperationException("The native request was too large.");
+                if (raw.Length > 4 * 1024 * 1024) throw new InvalidOperationException("The native request was too large.");
                 command = json.Deserialize<BridgeCommand>(raw);
                 if (command == null) return;
                 id = command.requestId;
@@ -148,7 +150,7 @@ namespace AeroVault.SolidWorks
                     ownerId = command.ownerId;
                     bridgeReady = true;
                     nextPresence = DateTime.MinValue;
-                    Send(new { type = "aerovault:ready", protocol = 2, version = "0.3.0" });
+                    Send(new { type = "aerovault:ready", protocol = 2, version = "0.4.0", assemblies = true });
                     PublishPresence();
                     return;
                 }
@@ -161,13 +163,14 @@ namespace AeroVault.SolidWorks
                 Guid parsed;
                 if (!Guid.TryParse(id, out parsed)) throw new InvalidOperationException("Invalid native request identifier.");
                 if (!bridgeReady) throw new InvalidOperationException("Sign in to Aero Vault before syncing.");
+                if (command.type == "aerovault:assembly-build") { await BuildAssembly(command); return; }
                 if (command.type == "aerovault:sync-result") { SyncResult(command); return; }
                 if (command.type == "aerovault:lease-result") { LeaseResult(command); return; }
                 if (command.type == "aerovault:disconnect-design") { DisconnectDesign(command); return; }
                 if (command.type == "aerovault:link-prepared") { LinkPrepared(command); return; }
                 if (command.type == "aerovault:package-active")
                 {
-                    if (packaging) throw new InvalidOperationException("A saved design is already transferring. Wait for it to finish.");
+                    if (packaging || assemblyBuilding) throw new InvalidOperationException("A saved design is already transferring. Wait for it to finish.");
                     packaging = true;
                     string file = null;
                     try
@@ -177,10 +180,11 @@ namespace AeroVault.SolidWorks
                         var paths = CadFiles.Dependencies(model);
                         string stamp = SyncState.Stamp(paths);
                         collecting = true;
-                        try { file = CadFiles.PackageDesign(application, model); } finally { collecting = false; }
+                        AssemblyManifest manifest = null;
+                        try { manifest = CaptureManifest(model, links.FirstOrDefault(l => l.OwnerId == ownerId && String.Equals(l.Root, model.GetPathName(), StringComparison.OrdinalIgnoreCase))); file = CadFiles.PackageDesign(application, model); manifest.WriteZip(file); } finally { collecting = false; }
                         if (SyncState.Stamp(paths) != stamp) throw new InvalidOperationException("The design changed while packaging. Prepare it again.");
                         preparedDesigns.Clear();
-                        preparedDesigns[id] = new PreparedDesign { Root = model.GetPathName(), Paths = paths, Stamp = stamp };
+                        preparedDesigns[id] = new PreparedDesign { Root = model.GetPathName(), Paths = paths, Stamp = stamp, Manifest = manifest.Serialize() };
                         await SendFile(file, id, null);
                         status.Text = "Review and upload this design once. Later saves will sync automatically.";
                     }
@@ -193,7 +197,7 @@ namespace AeroVault.SolidWorks
                 }
                 if (command.type == "aerovault:open-revision")
                 {
-                    if (packaging) throw new InvalidOperationException("Wait for the current package to finish.");
+                    if (packaging || assemblyBuilding) throw new InvalidOperationException("Wait for the current package to finish.");
                     if (!Guid.TryParse(command.revisionId, out parsed)) throw new InvalidOperationException("Invalid revision identifier.");
                     string url = Home + "/api/download?id=" + Uri.EscapeDataString(command.revisionId);
                     openRequests[url] = command;
@@ -216,6 +220,7 @@ namespace AeroVault.SolidWorks
             if (!bridgeReady || (automatic != null && automatic.OwnerId != transferOwner)) throw new InvalidOperationException("Sign in with the account that owns this local design link.");
             long size = new FileInfo(file).Length;
             Send(new { type = "aerovault:file-begin", requestId = id, name = Path.GetFileName(file), size = size,
+                manifest = automatic == null ? AssemblyManifest.Read(preparedDesigns[id].Manifest) : AssemblyManifest.Read(automatic.PendingManifest), rebuild = automatic != null && automatic.Rebuild,
                 automatic = automatic != null, packageId = automatic == null ? null : automatic.PackageId,
                 session = automatic == null ? null : automatic.Session, version = automatic == null ? 0 : automatic.PendingVersion,
                 packageName = automatic == null ? null : automatic.Name, subsystem = automatic == null ? null : automatic.Subsystem });
@@ -242,6 +247,7 @@ namespace AeroVault.SolidWorks
             try
             {
                 var operation = e.DownloadOperation;
+                if (HandleAssemblyDownload(e)) return;
                 Uri uri;
                 if (!Trusted(operation.Uri) || !Uri.TryCreate(operation.Uri, UriKind.Absolute, out uri) || uri.AbsolutePath != "/api/download") { e.Cancel = true; return; }
                 string name = Path.GetFileName(e.ResultFilePath);
@@ -276,7 +282,9 @@ namespace AeroVault.SolidWorks
                             if (stopped) return;
                             string[] candidates = Directory.GetFiles(extracted, "*", SearchOption.AllDirectories).Where(path => CadFiles.DocumentType(path) != 0).ToArray();
                             if (candidates.Length == 0) throw new InvalidDataException("The package contains no SolidWorks parts, assemblies, or drawings.");
-                            if (candidates.Length == 1) chosen = candidates[0];
+                            var manifest = AssemblyManifest.FromFolder(extracted);
+                            if (manifest != null) { manifest.VerifyFolder(extracted); chosen = Path.Combine(extracted, manifest.root); if (requested != null) requested.manifest = manifest; }
+                            else if (candidates.Length == 1) chosen = candidates[0];
                             else
                             {
                                 using (var picker = new OpenFileDialog { InitialDirectory = extracted, Title = "Choose the top-level assembly or design to open", Filter = "SolidWorks designs|*.sldasm;*.sldprt;*.slddrw", CheckFileExists = true, RestoreDirectory = true })

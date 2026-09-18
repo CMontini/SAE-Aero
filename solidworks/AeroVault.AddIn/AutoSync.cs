@@ -13,6 +13,7 @@ namespace AeroVault.SolidWorks
         internal string Root;
         internal string[] Paths;
         internal string Stamp;
+        internal string Manifest;
     }
 
     internal sealed partial class VaultPanel
@@ -85,7 +86,7 @@ namespace AeroVault.SolidWorks
             ticking = true;
             try
             {
-                foreach (var link in links.Where(l => l.OwnerId == ownerId))
+                foreach (var link in links.Where(l => l.OwnerId == ownerId).ToArray())
                 {
                     var model = CadFiles.FindOpen(application, link.Root);
                     bool wasOpen = link.Open;
@@ -118,7 +119,7 @@ namespace AeroVault.SolidWorks
                             // Snapshot only saved files. A later save is detected after this snapshot is acknowledged.
                             string file;
                             collecting = true;
-                            try { file = CadFiles.PackageDesign(application, model); } finally { collecting = false; }
+                            try { var manifest = CaptureManifest(model, link); file = CadFiles.PackageDesign(application, model); manifest.WriteZip(file); link.PendingManifest = manifest.Serialize(); link.Rebuild = false; } finally { collecting = false; }
                             if (SyncState.Stamp(paths) != stamp) { try { Directory.Delete(Path.GetDirectoryName(file), true); } catch { } continue; }
                             link.Paths = paths;
                             link.PendingFile = file;
@@ -172,6 +173,7 @@ namespace AeroVault.SolidWorks
                 string oldFile = link.PendingFile;
                 link.Version = command.version;
                 link.SyncedStamp = link.PendingStamp;
+                link.Manifest = link.PendingManifest; link.PendingManifest = null;
                 link.PendingFile = null; link.PendingId = null; link.PendingStamp = null;
                 bool newer = command.currentVersion > command.version;
                 link.Blocked = link.Blocked || newer;
@@ -179,6 +181,13 @@ namespace AeroVault.SolidWorks
                 else if (!link.Blocked) link.Message = "Saved to Aero Vault · revision " + link.Version;
                 SaveLinks();
                 try { Directory.Delete(Path.GetDirectoryName(oldFile), true); } catch { }
+            }
+            else if (command.conflict && link.Rebuild)
+            {
+                // This is a generated candidate, not a user's edited working copy.
+                // Retain its files, detach the stale snapshot, and let the planner retry fresh inputs.
+                links.Remove(link); SaveLinks();
+                Send(new { type = "aerovault:ended", packageId = link.PackageId, session = link.Session });
             }
             else
             {
@@ -193,6 +202,7 @@ namespace AeroVault.SolidWorks
         {
             PreparedDesign prepared;
             if (!preparedDesigns.TryGetValue(command.preparedId ?? "", out prepared)) throw new InvalidOperationException("Prepare the active design again to link it.");
+            command.manifest = AssemblyManifest.Read(prepared.Manifest);
             AddLink(command, prepared.Root, prepared.Paths, prepared.Stamp);
             preparedDesigns.Remove(command.preparedId);
         }
@@ -206,7 +216,7 @@ namespace AeroVault.SolidWorks
                 throw new InvalidOperationException("An earlier local copy has unsynced changes. Keep that copy; upload it manually or resolve the newer cloud revision before replacing its link.");
             if (prior != null) links.Remove(prior);
             links.Add(new DesignLink { PackageId = command.packageId, OwnerId = ownerId, Root = root, Name = command.name, Subsystem = command.subsystem,
-                Version = command.version, Paths = paths, SyncedStamp = stamp, Session = command.session, Open = true, Message = "Automatic saves enabled." });
+                Manifest = command.manifest == null ? null : command.manifest.Serialize(), Version = command.version, Paths = paths, SyncedStamp = stamp, Session = command.session, Open = true, Message = "Automatic saves enabled." });
             SaveLinks();
             nextPresence = DateTime.MinValue;
             PublishPresence();

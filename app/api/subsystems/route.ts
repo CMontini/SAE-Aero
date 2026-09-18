@@ -1,4 +1,4 @@
-import { payload, database, member, administrator, mutation, displayName, event, failure, HttpError, subsystemNames } from '@/lib/vault';
+import { payload, database, member, administrator, mutation, displayName, event, failure, HttpError, MAIN_ASSEMBLIES, subsystemNames } from '@/lib/vault';
 export async function POST(request: Request) {
     try {
         mutation(request);
@@ -10,6 +10,7 @@ export async function POST(request: Request) {
             throw new HttpError(400, 'Choose a valid subsystem folder.');
         const name = displayName(body.name, 60), current = await subsystemNames();
         if (current.revision !== body.revision) throw new HttpError(409, 'Folder names changed. Close this dialog and try again.');
+        if (!creating && body.id === MAIN_ASSEMBLIES) throw new HttpError(403, 'Main Assemblies is a protected system folder.');
         const id = creating ? `subsystem-${crypto.randomUUID()}` : body.id;
         if (!creating && (typeof id !== 'string' || !Object.hasOwn(current.labels, id))) throw new HttpError(400, 'Choose a valid subsystem folder.');
         const normalized = (s: string) => s.normalize('NFKC').toLowerCase().replace(/\s+/g, ' ');

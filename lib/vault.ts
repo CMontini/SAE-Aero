@@ -1,6 +1,7 @@
 import { env } from 'cloudflare:workers';
 import { getChatGPTUser } from '@/app/chatgpt-auth';
-export const SUBSYSTEMS = ['Wings', 'Fuselage', 'Empennage', 'Propulsion', 'Landing gear'];
+export const MAIN_ASSEMBLIES = 'system-main-assemblies';
+export const SUBSYSTEMS = ['Wings', 'Fuselage', 'Empennage', 'Propulsion', 'Landing gear', MAIN_ASSEMBLIES];
 export const MAX_BYTES = 50 * 1024 * 1024;
 export class HttpError extends Error {
     constructor(public status: number, message: string) { super(message); }
@@ -42,11 +43,11 @@ catch {
 // Rename only their display labels, so old links and queued saves remain valid.
 export async function subsystemNames() {
     const row = await database().prepare("SELECT value,revision FROM workspace_settings WHERE id='subsystems'").first<{value:string;revision:number}>();
-    const labels: Record<string,string> = Object.fromEntries(SUBSYSTEMS.map(id => [id,id]));
+    const labels: Record<string,string> = Object.fromEntries(SUBSYSTEMS.map(id => [id,id === MAIN_ASSEMBLIES ? 'Main Assemblies' : id]));
     if (row) {
         const saved = JSON.parse(row.value);
         for (const [id, name] of Object.entries(saved)) {
-            if ((SUBSYSTEMS.includes(id) || /^subsystem-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id)) && typeof name === 'string') labels[id] = name;
+            if (id !== MAIN_ASSEMBLIES && (SUBSYSTEMS.includes(id) || /^subsystem-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id)) && typeof name === 'string') labels[id] = name;
         }
     }
     return { labels, revision: row?.revision || 0 };

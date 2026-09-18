@@ -1,3 +1,4 @@
+import { assemblyPlans, assemblyRows } from '@/lib/assemblies';
 import { payload, database, identity, mutation, event, failure, HttpError, subsystemNames } from '@/lib/vault';
 export const dynamic = 'force-dynamic';
 export async function GET() { try {
@@ -12,8 +13,8 @@ export async function GET() { try {
         const invitation = await db.prepare('SELECT id FROM members WHERE email=? AND user_id IS NULL').bind(u.email.toLowerCase()).first();
         return Response.json({ join: !!invitation, denied: !invitation }, { headers: { 'Cache-Control': 'no-store' } });
     }
-    const [p, v, a, t] = await db.batch([db.prepare('SELECT p.id,p.name,p.subsystem,p.status,p.version,p.current_version_id,p.updated_at,CASE WHEN p.locked_at>? THEN p.locked_by ELSE NULL END AS locked_by,CASE WHEN p.locked_at>? THEN m.name ELSE NULL END AS locked_name FROM packages p LEFT JOIN members m ON p.locked_by=m.user_id ORDER BY p.updated_at DESC').bind(new Date(Date.now()-120000).toISOString(),new Date(Date.now()-120000).toISOString()), db.prepare('SELECT id,package_id,revision,filename,size,note,author_name,created_at FROM versions ORDER BY created_at DESC'), db.prepare('SELECT * FROM activity ORDER BY created_at DESC LIMIT 60'), db.prepare('SELECT id,user_id,name,email,role FROM members ORDER BY created_at')]);
-    return Response.json({ subsystems: await subsystemNames(), member: m, packages: p.results, versions: v.results, activity: a.results, members: t.results }, { headers: { 'Cache-Control': 'no-store' } });
+    const [p, v, a, t] = await db.batch([db.prepare('SELECT p.id,p.name,p.subsystem,p.system_key,p.assembly_message,p.status,p.version,p.current_version_id,p.updated_at,CASE WHEN p.locked_at>? THEN p.locked_by ELSE NULL END AS locked_by,CASE WHEN p.locked_at>? THEN m.name ELSE NULL END AS locked_name FROM packages p LEFT JOIN members m ON p.locked_by=m.user_id ORDER BY p.updated_at DESC').bind(new Date(Date.now()-120000).toISOString(),new Date(Date.now()-120000).toISOString()), db.prepare('SELECT id,package_id,revision,filename,size,note,author_name,created_at FROM versions ORDER BY created_at DESC'), db.prepare('SELECT * FROM activity ORDER BY created_at DESC LIMIT 60'), db.prepare('SELECT id,user_id,name,email,role FROM members ORDER BY created_at')]);
+    return Response.json({ subsystems: await subsystemNames(), member: m, assemblies: (assemblyPlans(await assemblyRows())).jobs.map(j=>({id:j.packageId,needsUpdate:j.needsUpdate,linked:j.dependencies.length})), packages: p.results, versions: v.results, activity: a.results, members: t.results }, { headers: { 'Cache-Control': 'no-store' } });
 }
 catch (e) {
     return failure(e);

@@ -46,6 +46,8 @@ namespace AeroVault.SolidWorks
             if (model == null) throw new InvalidOperationException("Open a part, assembly, or drawing first.");
             if (String.IsNullOrEmpty(model.GetPathName())) throw new InvalidOperationException("Save the active design in SOLIDWORKS first.");
             var dependencies = new HashSet<string>(Dependencies(model), StringComparer.OrdinalIgnoreCase);
+            var names = dependencies.Select(Path.GetFileName).ToArray();
+            if (names.Distinct(StringComparer.OrdinalIgnoreCase).Count() != names.Length) throw new InvalidOperationException("Two referenced designs have the same filename. Rename distinct CAD files in SOLIDWORKS before packaging.");
             IModelDoc2 open = application.GetFirstDocument() as IModelDoc2;
             while (open != null)
             {
@@ -64,7 +66,7 @@ namespace AeroVault.SolidWorks
                 package.IncludeDrawings = true;
                 package.IncludeSuppressed = true;
                 package.IncludeSimulationResults = false;
-                package.FlattenToSingleFolder = false;
+                package.FlattenToSingleFolder = true;
                 if (!package.SetSaveToName(true, destination)) throw new InvalidOperationException("SOLIDWORKS could not set the package destination.");
                 Array results = model.Extension.SavePackAndGo(package) as Array;
                 if (results == null || results.Length == 0) throw new InvalidOperationException("Pack and Go returned no file results. Create a package manually to inspect the design references.");

@@ -16,7 +16,7 @@ jobs:
     runs-on: windows-2022
     timeout-minutes: 20
     env:
-      INSTALLER_VERSION: '0.3.1'
+      INSTALLER_VERSION: '0.4.0'
     steps:
       - uses: actions/checkout@v4
       - name: Validate PowerShell syntax
@@ -29,6 +29,9 @@ jobs:
             [System.Management.Automation.Language.Parser]::ParseFile($_.FullName, [ref]$tokens, [ref]$parseErrors) | Out-Null
             if ($parseErrors.Count) { throw ($parseErrors | Out-String) }
           }
+      - name: Test assembly packaging on Windows
+        shell: powershell
+        run: .\solidworks\tests\Test-AssemblyManifest.ps1
       - name: Build installer
         shell: powershell
         run: |
@@ -62,13 +65,15 @@ jobs:
           $ErrorActionPreference = 'Stop'
           $tag = "aerovault-setup-$env:INSTALLER_VERSION-${{ github.run_number }}"
           $notes = @'
-          Windows installer for Aero Vault inside SOLIDWORKS 2026.
+          Windows installer for Aero Vault 0.4 inside SOLIDWORKS 2026.
+
+          Adds protected Main Assemblies, SAEAEROMAIN creation, tracked package references and queued assembly rebuilds. Save and close CAD documents while leaving SolidWorks and its signed-in Aero Vault panel open to process updates. Position and mate new components manually; existing components are retained. Read solidworks/ASSEMBLIES.md for setup and limitations.
 
           Download the EXE, close SOLIDWORKS, and run Setup in Windows. Approve the administrator prompt, then choose Install. No PowerShell commands or developer tools are required. Setup uses the installed SOLIDWORKS API, runs the Windows add-in tests, and installs Microsoft WebView2 if needed (internet required).
 
           After installation: start SOLIDWORKS normally, enable Tools > Add-Ins > Aero Vault, open its Task Pane tab, and sign in with an authorized team account. Workspace permission is separate from installation.
 
-          This pilot installer is not code-signed. A SHA-256 checksum is included. Tested here: installer compilation and missing-SOLIDWORKS preflight. A full install/upgrade/uninstall still requires testing on a Windows computer with SOLIDWORKS installed. Keep local CAD files and queued saves in place; uninstall preserves them.
+          This pilot installer is not code-signed. A SHA-256 checksum is included. Tested here: Windows manifest/ZIP composition tests, installer compilation and missing-SOLIDWORKS preflight. SOLIDWORKS rebuild and mate integration requires a CAD workstation test. A full install/upgrade/uninstall still requires testing on a Windows computer with SOLIDWORKS installed. Keep local CAD files and queued saves in place; uninstall preserves them.
           '@
           $notes | Set-Content release-notes.txt
           gh release create $tag "solidworks/installer/output/AeroVault-Setup-$env:INSTALLER_VERSION.exe" "solidworks/installer/output/AeroVault-Setup-$env:INSTALLER_VERSION.exe.sha256" --target $env:GITHUB_SHA --title "Aero Vault Windows Setup $env:INSTALLER_VERSION (build ${{ github.run_number }})" --notes-file release-notes.txt --latest
